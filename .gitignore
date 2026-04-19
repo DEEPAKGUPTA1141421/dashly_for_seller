@@ -1,0 +1,86 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IDEs and local tooling
+.idea/
+.vscode/
+.claude/
+*.iml
+*.ipr
+*.iws
+
+# Flutter / Dart / Pub
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+.pub-cache/
+/build/
+/coverage/
+
+# Symbolication
+app.*.symbols
+
+# Obfuscation
+app.*.map.json
+
+# Android
+/android/.gradle/
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+/android/key.properties
+/android/local.properties
+*.jks
+*.keystore
+
+# iOS
+/ios/.symlinks/
+/ios/DerivedData/
+/ios/Flutter/App.framework
+/ios/Flutter/ephemeral/
+/ios/Flutter/Flutter.framework
+/ios/Flutter/Flutter.podspec
+/ios/Flutter/Generated.xcconfig
+/ios/Flutter/flutter_export_environment.sh
+/ios/Pods/
+/ios/Runner.xcodeproj/project.xcworkspace/
+/ios/Runner.xcworkspace/
+
+# macOS
+/macos/Flutter/ephemeral/
+/macos/Pods/
+/macos/Runner.xcworkspace/
+
+# Linux
+/linux/flutter/ephemeral/
+
+# Windows
+/windows/flutter/ephemeral/
+
+# Web
+/web/build/
+
+# Unused desktop / web platform scaffolding (mobile-only app)
+/linux/
+/macos/
+/windows/
+/web/
+
+# Environment / secrets
+.env
+.env.*
+google-services.json
+GoogleService-Info.plist

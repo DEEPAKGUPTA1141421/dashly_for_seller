@@ -7,10 +7,9 @@ import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
 import 'add_product/steps/category_step.dart';
 import 'add_product/steps/basic_info_step.dart';
-import 'add_product/steps/images_step.dart';
-import 'add_product/steps/pricing_step.dart';
 import 'add_product/steps/attributes_step.dart';
 import 'add_product/steps/variants_step.dart';
+import 'add_product/steps/images_step.dart';
 import 'add_product/steps/tags_brand_step.dart';
 import 'add_product/steps/review_step.dart';
 
@@ -23,17 +22,16 @@ class AddProductScreen extends ConsumerStatefulWidget {
 
 class _AddProductScreenState extends ConsumerState<AddProductScreen> {
   static const _stepLabels = [
-    'Category', 'Basic Info', 'Images', 'Pricing',
-    'Attributes', 'Variants', 'Brand & Tags', 'Review',
+    'Category', 'Basic Info', 'Attributes',
+    'Variants', 'Photos', 'Brand & Tags', 'Review',
   ];
 
   static const _stepIcons = [
     CupertinoIcons.square_grid_2x2,
     CupertinoIcons.doc_text,
-    CupertinoIcons.photo_on_rectangle,
-    CupertinoIcons.tag,
     CupertinoIcons.slider_horizontal_3,
     CupertinoIcons.rectangle_stack,
+    CupertinoIcons.photo_on_rectangle,
     CupertinoIcons.heart,
     CupertinoIcons.rocket,
   ];
@@ -52,10 +50,9 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
     final steps = <Widget>[
       const CategoryStep(),
       const BasicInfoStep(),
-      const ImagesStep(),
-      const PricingStep(),
       const AttributesStep(),
       const VariantsStep(),
+      const ImagesStep(),
       const TagsBrandStep(),
       const ReviewStep(),
     ];
@@ -103,12 +100,17 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
 
         body: Column(
           children: [
-            // ── Step progress bar ──────────────────────────────────────────
-            _StepBar(current: step, total: _stepLabels.length, icons: _stepIcons, labels: _stepLabels),
-
+            _StepBar(
+              current: step,
+              total: _stepLabels.length,
+              icons: _stepIcons,
+              labels: _stepLabels,
+              onStepTap: (i) {
+                HapticUtils.light();
+                ref.read(addProductPod.notifier).goToStep(i);
+              },
+            ),
             const Divider(color: AppColors.border, height: 1),
-
-            // ── Step content ───────────────────────────────────────────────
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 300),
@@ -139,12 +141,14 @@ class _StepBar extends StatelessWidget {
   final int total;
   final List<IconData> icons;
   final List<String> labels;
+  final void Function(int)? onStepTap;
 
   const _StepBar({
     required this.current,
     required this.total,
     required this.icons,
     required this.labels,
+    this.onStepTap,
   });
 
   @override
@@ -156,70 +160,73 @@ class _StepBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         itemCount: total,
         itemBuilder: (_, i) {
-          final done     = i < current;
-          final active   = i == current;
+          final done   = i < current;
+          final active = i == current;
           return Row(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Icon bubble + label
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(
-                      color: done
-                          ? AppColors.success
-                          : active
-                              ? AppColors.white
-                              : AppColors.surface,
-                      shape: BoxShape.circle,
-                      border: Border.all(
+              GestureDetector(
+                onTap: done ? () => onStepTap?.call(i) : null,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(
                         color: done
                             ? AppColors.success
                             : active
                                 ? AppColors.white
-                                : AppColors.border,
-                        width: 1.5,
+                                : AppColors.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: done
+                              ? AppColors.success
+                              : active
+                                  ? AppColors.white
+                                  : AppColors.border,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Center(
+                        child: done
+                            ? const Icon(CupertinoIcons.checkmark,
+                                color: Colors.white, size: 18)
+                            : Icon(
+                                icons[i],
+                                color: active ? AppColors.bg : AppColors.greyDark,
+                                size: 20,
+                              ),
                       ),
                     ),
-                    child: Center(
-                      child: done
-                          ? const Icon(CupertinoIcons.checkmark,
-                              color: Colors.white, size: 18)
-                          : Icon(
-                              icons[i],
-                              color: active ? AppColors.bg : AppColors.greyDark,
-                              size: 20,
-                            ),
+                    const SizedBox(height: 5),
+                    Text(
+                      labels[i],
+                      style: TextStyle(
+                        color: done
+                            ? AppColors.success
+                            : active
+                                ? AppColors.white
+                                : AppColors.greyDark,
+                        fontSize: 11,
+                        fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    labels[i],
-                    style: TextStyle(
-                      color: done
-                          ? AppColors.success
-                          : active
-                              ? AppColors.white
-                              : AppColors.greyDark,
-                      fontSize: 11,
-                      fontWeight:
-                          active ? FontWeight.w600 : FontWeight.w400,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-              // Connector line centred at bubble midpoint
               if (i < total - 1)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 18),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 250),
-                    width: 16, height: 2,
-                    color: done ? AppColors.success : AppColors.border,
+                    width: 28, height: 2,
+                    decoration: BoxDecoration(
+                      color: done ? AppColors.success : AppColors.border,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
                   ),
                 ),
             ],

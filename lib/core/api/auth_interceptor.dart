@@ -36,11 +36,11 @@ class AuthInterceptor extends Interceptor {
   ) async {
     final statusCode = err.response?.statusCode;
 
-    if (statusCode != 401 && statusCode != 403) {
+    if (statusCode != 401) {
       return handler.next(err);
     }
 
-    // Refresh endpoint itself returned 401/403 → full logout
+    // Refresh endpoint itself returned 401 → full logout
     if (err.requestOptions.path.contains(ApiEndpoints.refresh)) {
       await _clearAndDrain(err, handler);
       return;

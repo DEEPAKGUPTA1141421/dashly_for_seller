@@ -33,9 +33,9 @@ class _BasicInfoStepState extends ConsumerState<BasicInfoStep> {
     super.dispose();
   }
 
-  void _next() {
+  Future<void> _next() async {
     if (!_formKey.currentState!.validate()) return;
-    ref.read(addProductPod.notifier).saveBasicInfo(
+    await ref.read(addProductPod.notifier).createProduct(
       _nameCtrl.text.trim(),
       _descCtrl.text.trim(),
     );
@@ -43,6 +43,9 @@ class _BasicInfoStepState extends ConsumerState<BasicInfoStep> {
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(addProductPod);
+    final isCreating = state.isCreating;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Form(
@@ -76,6 +79,30 @@ class _BasicInfoStepState extends ConsumerState<BasicInfoStep> {
 
             const SizedBox(height: 12),
 
+            // Error banner
+            if (state.error != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        state.error!,
+                        style: const TextStyle(color: AppColors.error, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Tip
             Container(
               padding: const EdgeInsets.all(14),
@@ -105,6 +132,7 @@ class _BasicInfoStepState extends ConsumerState<BasicInfoStep> {
               label: 'Continue',
               onTap: _next,
               icon: Icons.arrow_forward_rounded,
+              isLoading: isCreating,
             ).animate().fadeIn(delay: 240.ms),
           ],
         ),

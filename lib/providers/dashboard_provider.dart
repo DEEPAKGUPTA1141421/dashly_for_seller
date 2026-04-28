@@ -49,36 +49,39 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
   Future<void> fetchDashboard() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      // Fetch recent bookings from order service + seller draft products from product service
+      // Parallel: seller stats + recent orders (5) + product count
       final results = await Future.wait([
-        // GET /api/v1/booking?page=0&size=5  (recent orders)
-        _orderClient.get(ApiEndpoints.bookings, queryParameters: {'page': 0, 'size': 5}),
-        // GET /api/v1/seller/product/draft-product  (seller's products for count)
-        _productClient.get(ApiEndpoints.sellerProductDraft),
+        _orderClient.get(ApiEndpoints.sellerStats, queryParameters: {'days': 7}),
+        _orderClient.get(ApiEndpoints.sellerOrders, queryParameters: {'page': 0, 'size': 5}),
+        _productClient.get(ApiEndpoints.sellerProducts, queryParameters: {'page': 0, 'size': 1}),
       ]);
 
-      final bookingBody  = results[0].data as Map<String, dynamic>;
-      final productBody  = results[1].data as Map<String, dynamic>;
+      final statsBody   = results[0].data as Map<String, dynamic>;
+      final ordersBody  = results[1].data as Map<String, dynamic>;
+      final productBody = results[2].data as Map<String, dynamic>;
 
-      final orders   = (bookingBody['data'] as List<dynamic>?)  ?? [];
-      final products = (productBody['data'] as List<dynamic>?)  ?? [];
+      final statsData  = (statsBody['data'] as Map<String, dynamic>?) ?? {};
+      final ordersData = (ordersBody['data'] as Map<String, dynamic>?)?['orders'] as List<dynamic>? ?? [];
+      final productCount = ((productBody['data'] as List<dynamic>?)?.length) ?? 0;
 
-      // Derive stats from the raw data since there is no dedicated dashboard endpoint
-      final totalRevenue = orders.fold<double>(
-        0,
-        (sum, o) => sum + ((o['totalAmount'] as num?) ?? 0).toDouble(),
-      );
+      // Daily chart: [{day, orders, revenuePaise, revenueRupees}]
+      final chart = (statsData['dailyChart'] as List<dynamic>?) ?? [];
+
+      final pendingOrders = (statsData['pendingOrders'] as num?)?.toInt() ?? 0;
+      final alerts = _buildAlerts(statsData, pendingOrders);
 
       state = state.copyWith(
-        isLoading: false,
-        recentOrders: orders,
+        isLoading:    false,
+        recentOrders: ordersData,
+        salesChart:   chart,
+        alerts:       alerts,
         stats: {
-          'totalOrders':    bookingBody['totalElements'] ?? orders.length,
-          'totalProducts':  products.length,
-          'totalRevenue':   totalRevenue,
-          'pendingOrders':  orders.where((o) => o['status'] == 'PENDING').length,
-          'revenueChange':  0,
-          'ordersChange':   0,
+          'totalOrders':    statsData['totalOrders']    ?? 0,
+          'pendingOrders':  pendingOrders,
+          'totalProducts':  productCount,
+          'totalRevenue':   double.tryParse(statsData['totalRevenueRupees']?.toString() ?? '0') ?? 0,
+          'revenueChange':  (statsData['revenueChange'] as num?)?.toDouble() ?? 0.0,
+          'ordersChange':   (statsData['ordersChange']  as num?)?.toDouble() ?? 0.0,
           'productsChange': 0,
           'pendingChange':  0,
         },
@@ -88,6 +91,24 @@ class DashboardNotifier extends StateNotifier<DashboardState> {
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }
+  }
+
+  List<Map<String, String>> _buildAlerts(Map<String, dynamic> stats, int pendingOrders) {
+    final alerts = <Map<String, String>>[];
+
+    if (pendingOrders >= 10) {
+      alerts.add({'type': 'warning', 'message': '$pendingOrders orders are waiting for confirmation'});
+    } else if (pendingOrders > 0) {
+      alerts.add({'type': 'info', 'message': '$pendingOrders order${pendingOrders > 1 ? 's' : ''} pending your action'});
+    }
+
+    final breakdown = stats['statusBreakdown'] as Map<String, dynamic>? ?? {};
+    final processing = (breakdown['PROCESSING'] as num?)?.toInt() ?? 0;
+    if (processing >= 5) {
+      alerts.add({'type': 'info', 'message': '$processing orders are currently being processed'});
+    }
+
+    return alerts;
   }
 }
 

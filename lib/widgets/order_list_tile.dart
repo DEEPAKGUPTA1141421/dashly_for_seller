@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../core/widgets/status_badge.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
 
@@ -11,13 +12,13 @@ class OrderListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status   = order['status'] as String? ?? 'PENDING';
-    final orderId  = order['orderId'] as String? ?? '#----';
-    final amount   = order['amount'] as num? ?? 0;
-    final customer = order['customerName'] as String? ?? 'Customer';
-    final items    = order['itemCount'] as int? ?? 0;
-
-    final (statusColor, statusBg) = _statusColors(status);
+    final status    = order['status'] as String? ?? 'INITIATED';
+    final bookingId = (order['bookingId'] ?? '').toString();
+    final shortId   = bookingId.length > 8 ? '#${bookingId.substring(0, 8).toUpperCase()}' : '#$bookingId';
+    final amountStr = order['totalAmountRupees'] as String? ?? '0.00';
+    final itemCount = (order['itemCount'] as num?)?.toInt() ?? 0;
+    final payMode   = order['paymentMode'] as String? ?? '';
+    final createdAt = order['createdAt'] as String? ?? '';
 
     return GestureDetector(
       onTap: () {
@@ -34,7 +35,6 @@ class OrderListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Order icon
             Container(
               width: 44,
               height: 44,
@@ -50,12 +50,12 @@ class OrderListTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    orderId,
+                    shortId,
                     style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '$customer · $items item${items != 1 ? 's' : ''}',
+                    '$itemCount item${itemCount != 1 ? 's' : ''}${payMode.isNotEmpty ? ' · $payMode' : ''}',
                     style: const TextStyle(color: AppColors.grey, fontSize: 12),
                   ),
                 ],
@@ -65,21 +65,18 @@ class OrderListTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '₹$amount',
+                  '₹$amountStr',
                   style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: statusBg,
-                    borderRadius: BorderRadius.circular(20),
+                StatusBadge.fromString(status, small: true),
+                if (createdAt.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    _relativeTime(createdAt),
+                    style: const TextStyle(color: AppColors.greyDark, fontSize: 10),
                   ),
-                  child: Text(
-                    status,
-                    style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w600),
-                  ),
-                ),
+                ],
               ],
             ),
           ],
@@ -88,13 +85,17 @@ class OrderListTile extends StatelessWidget {
     );
   }
 
-  (Color, Color) _statusColors(String status) {
-    switch (status.toUpperCase()) {
-      case 'DELIVERED':  return (AppColors.success, AppColors.success.withOpacity(0.12));
-      case 'SHIPPED':    return (AppColors.info,    AppColors.info.withOpacity(0.12));
-      case 'PROCESSING': return (AppColors.warning, AppColors.warning.withOpacity(0.12));
-      case 'CANCELLED':  return (AppColors.error,   AppColors.error.withOpacity(0.12));
-      default:           return (AppColors.grey,    AppColors.surface2);
+  String _relativeTime(String iso) {
+    try {
+      final dt   = DateTime.parse(iso).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours   < 24) return '${diff.inHours}h ago';
+      if (diff.inDays    <  7) return '${diff.inDays}d ago';
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${dt.day} ${months[dt.month - 1]}';
+    } catch (_) {
+      return '';
     }
   }
 }

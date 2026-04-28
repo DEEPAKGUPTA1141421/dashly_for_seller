@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/onboarding_provider.dart';
 import '../../utils/app_colors.dart';
+import '../../utils/storage_service.dart';
 import 'steps/basic_info_step.dart';
 import 'steps/business_step.dart';
 import 'steps/location_step.dart';
@@ -44,6 +45,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // If the settings check finds onboarding already complete, skip to home.
+    ref.listen(onboardingPod.select((s) => s.isComplete), (_, complete) {
+      if (complete && mounted) {
+        StorageService.saveOnboardingComplete(true); // fire-and-forget; navigation is instant
+        Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
+      }
+    });
+
     final state = ref.watch(onboardingPod);
     final step  = state.currentStep;
 

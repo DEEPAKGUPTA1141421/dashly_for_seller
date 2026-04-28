@@ -82,6 +82,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
         if (sellerId != null && sellerId.isNotEmpty) {
           await StorageService.saveSellerId(sellerId);
         }
+        // Persist onboarding completion so the router can gate home vs. onboarding
+        final stage = user?['onboardingStage']?.toString() ?? '';
+        final onboardingComplete = stage == 'DOCUMENT_VERIFIED' || stage == 'DOCUMENT_VERIFICATION_PENDING';
+        await StorageService.saveOnboardingComplete(onboardingComplete);
         state = state.copyWith(isLoading: false, isLoggedIn: true);
         return true;
       }

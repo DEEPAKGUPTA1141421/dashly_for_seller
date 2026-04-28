@@ -39,11 +39,51 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(addProductPod.notifier).init());
+    Future.microtask(() async {
+      await ref.read(addProductPod.notifier).init();
+      await ref.read(addProductPod.notifier).checkForDraft();
+    });
+  }
+
+  void _showDraftDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Unfinished Product',
+          style: TextStyle(color: AppColors.white, fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'You have an unfinished product draft. Would you like to continue where you left off?',
+          style: TextStyle(color: AppColors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(addProductPod.notifier).discardDraft();
+            },
+            child: const Text('Discard', style: TextStyle(color: AppColors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(addProductPod.notifier).resumeDraft();
+            },
+            child: const Text('Continue', style: TextStyle(color: AppColors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AddProductState>(addProductPod, (_, next) {
+      if (next.hasDraft && mounted) _showDraftDialog(context);
+    });
     final state = ref.watch(addProductPod);
     final step  = state.currentStep;
 
@@ -101,10 +141,11 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
         body: Column(
           children: [
             _StepBar(
-              current: step,
-              total: _stepLabels.length,
-              icons: _stepIcons,
-              labels: _stepLabels,
+              current:     step,
+              maxReached:  state.maxReachedStep,
+              total:       _stepLabels.length,
+              icons:       _stepIcons,
+              labels:      _stepLabels,
               onStepTap: (i) {
                 HapticUtils.light();
                 ref.read(addProductPod.notifier).goToStep(i);
@@ -138,6 +179,7 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
 
 class _StepBar extends StatelessWidget {
   final int current;
+  final int maxReached;
   final int total;
   final List<IconData> icons;
   final List<String> labels;
@@ -145,6 +187,7 @@ class _StepBar extends StatelessWidget {
 
   const _StepBar({
     required this.current,
+    required this.maxReached,
     required this.total,
     required this.icons,
     required this.labels,
@@ -154,78 +197,110 @@ class _StepBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 96,
+      height: 108,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         itemCount: total,
         itemBuilder: (_, i) {
-          final done   = i < current;
-          final active = i == current;
+          // done = completed (green), tappable if within maxReached
+          final done      = i < maxReached;
+          final active    = i == current;
+          final tappable  = i <= maxReached && !active;
+
           return Row(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               GestureDetector(
-                onTap: done ? () => onStepTap?.call(i) : null,
+                onTap: tappable ? () => onStepTap?.call(i) : null,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // ── Circle ──────────────────────────────────────────────
                     AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      width: 44, height: 44,
+                      duration: const Duration(milliseconds: 320),
+                      curve: Curves.easeOutCubic,
+                      width:  active ? 54 : (done ? 48 : 44),
+                      height: active ? 54 : (done ? 48 : 44),
                       decoration: BoxDecoration(
+                        shape: BoxShape.circle,
                         color: done
                             ? AppColors.success
                             : active
                                 ? AppColors.white
                                 : AppColors.surface,
-                        shape: BoxShape.circle,
                         border: Border.all(
                           color: done
                               ? AppColors.success
                               : active
                                   ? AppColors.white
                                   : AppColors.border,
-                          width: 1.5,
+                          width: active ? 2.5 : 1.5,
                         ),
+                        boxShadow: active
+                            ? [BoxShadow(color: Colors.white.withOpacity(0.16), blurRadius: 14, spreadRadius: 1)]
+                            : done
+                                ? [BoxShadow(color: AppColors.success.withOpacity(0.28), blurRadius: 8)]
+                                : null,
                       ),
                       child: Center(
                         child: done
-                            ? const Icon(CupertinoIcons.checkmark,
-                                color: Colors.white, size: 18)
+                            ? const Icon(CupertinoIcons.checkmark, color: Colors.white, size: 20)
                             : Icon(
                                 icons[i],
                                 color: active ? AppColors.bg : AppColors.greyDark,
-                                size: 20,
+                                size: active ? 24 : 20,
                               ),
                       ),
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      labels[i],
+                    const SizedBox(height: 7),
+                    // ── Label ────────────────────────────────────────────────
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 280),
                       style: TextStyle(
                         color: done
                             ? AppColors.success
-                            : active
-                                ? AppColors.white
-                                : AppColors.greyDark,
-                        fontSize: 11,
-                        fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                            : active ? AppColors.white : AppColors.greyDark,
+                        fontSize:      active ? 11.5 : 10.5,
+                        fontWeight:    active ? FontWeight.w700 : (done ? FontWeight.w500 : FontWeight.w400),
+                        letterSpacing: active ? 0.2 : 0,
                       ),
+                      child: Text(labels[i]),
                     ),
                   ],
                 ),
-              ),
+              )
+              .animate(delay: Duration(milliseconds: i * 50))
+              .fadeIn(duration: 300.ms),
+
+              // ── Connector ────────────────────────────────────────────────
               if (i < total - 1)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 18),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    width: 28, height: 2,
-                    decoration: BoxDecoration(
-                      color: done ? AppColors.success : AppColors.border,
-                      borderRadius: BorderRadius.circular(1),
+                  padding: const EdgeInsets.only(bottom: 26),
+                  child: SizedBox(
+                    width: 26, height: 2,
+                    child: Stack(
+                      children: [
+                        Container(
+                          width: 26, height: 2,
+                          decoration: BoxDecoration(
+                            color: AppColors.border,
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                        ),
+                        AnimatedOpacity(
+                          opacity: done ? 1.0 : 0.0,
+                          duration: const Duration(milliseconds: 400),
+                          child: Container(
+                            width: 26, height: 2,
+                            decoration: BoxDecoration(
+                              color: AppColors.success,
+                              borderRadius: BorderRadius.circular(1),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -233,6 +308,6 @@ class _StepBar extends StatelessWidget {
           );
         },
       ),
-    ).animate().fadeIn();
+    );
   }
 }

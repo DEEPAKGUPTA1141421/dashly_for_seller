@@ -3,13 +3,17 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../core/widgets/app_shimmer.dart';
+import '../main_layout.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/notifications_provider.dart';
 import '../providers/onboarding_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/mini_sales_chart.dart';
 import '../widgets/order_list_tile.dart';
+import 'earnings_screen.dart';
+import 'notifications_screen.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -25,6 +29,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     Future.microtask(() async {
       await ref.read(onboardingPod.notifier).checkOnboardingStatus();
       ref.read(dashboardPod.notifier).fetchDashboard();
+      ref.read(notificationsPod.notifier).fetchNotifications();
     });
   }
 
@@ -73,10 +78,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                       const Spacer(),
                       // Notification bell
-                      _IconButton(
-                        icon: Icons.notifications_outlined,
-                        onTap: () {},
-                        badge: (state.alerts.isNotEmpty) ? state.alerts.length : null,
+                      _BellButton(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                        ),
                       ),
                     ],
                   ).animate().fadeIn(),
@@ -90,6 +95,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                     child: _ProfileIncompleteBanner(
                       onTap: () => Navigator.pushNamed(context, '/onboarding'),
+                    ),
+                  ).animate().fadeIn(),
+                ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+              // Needs-attention banner (CONFIRMED orders awaiting acceptance)
+              if (!state.isLoading && (state.stats['pendingOrders'] as num? ?? 0) > 0)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    child: _NeedsAttentionBanner(
+                      count: (state.stats['pendingOrders'] as num).toInt(),
+                      onTap: () => ref.read(navIndexPod.notifier).state = 1,
                     ),
                   ).animate().fadeIn(),
                 ),
@@ -176,6 +195,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
+              // Earnings card
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _EarningsCard(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const EarningsScreen()),
+                    ),
+                  ),
+                ).animate().fadeIn(delay: 120.ms),
+              ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 28)),
+
               // Alerts
               if (state.alerts.isNotEmpty)
                 SliverToBoxAdapter(
@@ -209,7 +243,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                       const Spacer(),
                       GestureDetector(
-                        onTap: () => HapticUtils.light(),
+                        onTap: () {
+                          HapticUtils.light();
+                          ref.read(navIndexPod.notifier).state = 1; // Orders tab
+                        },
                         child: const Text(
                           'See all',
                           style: TextStyle(color: AppColors.grey, fontSize: 13),
@@ -265,45 +302,132 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-class _IconButton extends StatelessWidget {
-  final IconData icon;
+class _NeedsAttentionBanner extends StatelessWidget {
+  final int count;
   final VoidCallback onTap;
-  final int? badge;
-
-  const _IconButton({required this.icon, required this.onTap, this.badge});
+  const _NeedsAttentionBanner({required this.count, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        HapticUtils.light();
-        onTap();
-      },
+      onTap: () { HapticUtils.light(); onTap(); },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.warning.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.warning.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.notifications_active_rounded, color: AppColors.warning, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$count order${count > 1 ? 's' : ''} need${count == 1 ? 's' : ''} your action',
+                    style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Tap to review and accept',
+                    style: TextStyle(color: AppColors.grey, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.warning, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EarningsCard extends StatelessWidget {
+  final VoidCallback onTap;
+  const _EarningsCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () { HapticUtils.light(); onTap(); },
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.success.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.account_balance_wallet_rounded, color: AppColors.success, size: 22),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Earnings & Wallet', style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+                  SizedBox(height: 2),
+                  Text('View balance & transactions', style: TextStyle(color: AppColors.grey, fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.greyDark, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BellButton extends ConsumerWidget {
+  final VoidCallback onTap;
+  const _BellButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(notificationsPod).unreadCount;
+    return GestureDetector(
+      onTap: () { HapticUtils.light(); onTap(); },
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 42, height: 42,
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.border),
             ),
-            child: Icon(icon, color: AppColors.white, size: 20),
+            child: const Icon(Icons.notifications_outlined, color: AppColors.white, size: 20),
           ),
-          if (badge != null)
+          if (unread > 0)
             Positioned(
-              right: -4,
-              top: -4,
+              right: -4, top: -4,
               child: Container(
-                width: 18,
-                height: 18,
+                width: 18, height: 18,
                 decoration: const BoxDecoration(color: AppColors.error, shape: BoxShape.circle),
                 child: Center(
                   child: Text(
-                    '$badge',
-                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                    unread > 9 ? '9+' : '$unread',
+                    style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800),
                   ),
                 ),
               ),

@@ -232,6 +232,32 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     }
   }
 
+  // ── Change Password ───────────────────────────────────────────────────────
+  // PUT /api/v1/seller/settings/security/password  (JSON)
+  // Fields: currentPassword, newPassword
+  Future<bool> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    state = state.copyWith(savingSection: 'security', clearError: true, clearSuccess: true);
+    try {
+      final res  = await _client.put(ApiEndpoints.settingsPassword, data: {
+        'currentPassword': currentPassword,
+        'newPassword':     newPassword,
+      });
+      final body = res.data as Map<String, dynamic>;
+      if (body['success'] == true) {
+        state = state.copyWith(clearSaving: true, successMessage: 'Password updated successfully');
+        return true;
+      }
+      state = state.copyWith(clearSaving: true, error: body['message'] ?? 'Failed to update password');
+      return false;
+    } on DioException catch (e) {
+      state = state.copyWith(clearSaving: true, error: AppException.fromDioError(e).message);
+      return false;
+    }
+  }
+
   void clearMessages() =>
       state = state.copyWith(clearError: true, clearSuccess: true);
 

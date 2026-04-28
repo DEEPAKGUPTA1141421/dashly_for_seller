@@ -3,9 +3,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class StorageService {
   static const _storage = FlutterSecureStorage();
 
-  static const _accessTokenKey  = 'seller_access_token';
-  static const _refreshTokenKey = 'seller_refresh_token';
-  static const _sellerIdKey     = 'seller_id';
+  static const _accessTokenKey        = 'seller_access_token';
+  static const _refreshTokenKey       = 'seller_refresh_token';
+  static const _sellerIdKey           = 'seller_id';
+  static const _onboardingCompleteKey = 'seller_onboarding_complete';
 
   // In-memory cache — populated on saveTokens so interceptor never reads null
   // from an uninitialized FlutterSecureStorage instance on Android.
@@ -54,5 +55,13 @@ class StorageService {
   static Future<bool> isLoggedIn() async {
     final token = await getAccessToken();
     return token != null && token.isNotEmpty;
+  }
+
+  static Future<void> saveOnboardingComplete(bool complete) async =>
+      _storage.write(key: _onboardingCompleteKey, value: complete.toString());
+
+  static Future<bool> isOnboardingComplete() async {
+    final value = await _storage.read(key: _onboardingCompleteKey);
+    return value == 'true';
   }
 }

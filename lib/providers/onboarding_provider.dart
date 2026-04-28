@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api/api_client.dart';
 import '../core/api/api_endpoints.dart';
 import '../core/errors/app_exception.dart';
+import '../utils/storage_service.dart';
 
 class OnboardingState {
   final bool isLoading;
@@ -159,8 +160,8 @@ class OnboardingNotifier extends StateNotifier<OnboardingState> {
           'city':      data['city'],
           'state':     data['state'],
           'pincode':   data['pincode'],
-          'latitude':  0.0,
-          'longitude': 0.0,
+          'latitude':  (data['latitude']  as double?) ?? 0.0,
+          'longitude': (data['longitude'] as double?) ?? 0.0,
         },
       );
       final body = res.data as Map<String, dynamic>;
@@ -185,7 +186,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingState> {
         data: {
           'accountNumber':   data['accountNumber'],
           'ifscCode':        data['ifsc'],
-          'beneficiaryName': data['accountHolder'],
+          'accountHolderName': data['accountHolder'],
           'bankName':        data['bankName'],
         },
       );
@@ -212,6 +213,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingState> {
         state = state.copyWith(isLoading: false, error: sendBody['message']);
         return false;
       }
+      await StorageService.saveOnboardingComplete(true);
       state = state.copyWith(isLoading: false, currentStep: 5, isComplete: true);
       return true;
     } on DioException catch (e) {
@@ -257,17 +259,42 @@ class OnboardingNotifier extends StateNotifier<OnboardingState> {
         if ((personal['phone']         as String?)?.isNotEmpty == true) 'phone':           personal['phone'],
         if ((personal['displayName']   as String?)?.isNotEmpty == true) 'displayName':     personal['displayName'],
         if ((personal['profile_image'] as String?)?.isNotEmpty == true) 'profileImageUrl': personal['profile_image'],
+        if ((personal['address']       as String?)?.isNotEmpty == true) 'address':         personal['address'],
+        if ((personal['city']          as String?)?.isNotEmpty == true) 'city':            personal['city'],
+        if ((personal['state']         as String?)?.isNotEmpty == true) 'state':           personal['state'],
+        if ((personal['pinCode']       as String?)?.isNotEmpty == true) 'pincode':         personal['pinCode'],
         if ((business['businessName']  as String?)?.isNotEmpty == true) 'businessName':    business['businessName'],
         if ((business['shopCategory']  as String?)?.isNotEmpty == true) 'businessType':    business['shopCategory'],
         if (bank != null) ...{
-          if (bank['accountNumber']   != null) 'accountNumber': bank['accountNumber'].toString(),
-          if (bank['bankName']        != null) 'bankName':      bank['bankName'].toString(),
-          if (bank['ifscCode']        != null) 'ifsc':          bank['ifscCode'].toString(),
-          if (bank['beneficiaryName'] != null) 'accountHolder': bank['beneficiaryName'].toString(),
+          if (bank['accountHolderName'] != null) 'accountHolder': bank['accountHolderName'].toString(),
+          if (bank['accountNumber']     != null) 'accountNumber': bank['accountNumber'].toString(),
+          if (bank['bankName']          != null) 'bankName':      bank['bankName'].toString(),
+          if (bank['ifscCode']          != null) 'ifsc':          bank['ifscCode'].toString(),
         },
       };
 
-      state = state.copyWith(isComplete: done, isLoadingSettings: false, formData: prefill);
+      // Determine which step to resume from based on data completeness
+      int resumeStep = 0;
+      if (done) {
+        resumeStep = 5;
+      } else if (bank != null) {
+        resumeStep = 4; // bank saved → resume at Aadhaar
+      } else if ((personal['address'] as String?)?.isNotEmpty == true ||
+                 (personal['city']    as String?)?.isNotEmpty == true) {
+        resumeStep = 3; // location saved → resume at Bank
+      } else if ((business['businessName'] as String?)?.isNotEmpty == true) {
+        resumeStep = 2; // business saved → resume at Location
+      } else if ((personal['fullName'] as String?)?.isNotEmpty == true) {
+        resumeStep = 1; // name saved → resume at Business
+      }
+
+      if (done) await StorageService.saveOnboardingComplete(true);
+      state = state.copyWith(
+        isComplete:        done,
+        isLoadingSettings: false,
+        formData:          prefill,
+        currentStep:       resumeStep,
+      );
       return done;
     } catch (_) {
       state = state.copyWith(isLoadingSettings: false);

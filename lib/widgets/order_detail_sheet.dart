@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/widgets/app_toast.dart';
+import '../core/widgets/confirm_modal.dart';
+import '../core/widgets/status_badge.dart';
 import '../providers/orders_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
@@ -24,36 +27,81 @@ class OrderDetailSheet extends ConsumerStatefulWidget {
 
 class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
   bool _updating = false;
+  bool _loadingDetail = false;
+  Map<String, dynamic> _detail = {};
 
-  String get _bookingId =>
-      (widget.order['bookingId'] ?? widget.order['orderId'] ?? '').toString();
+  String get _bookingId => (widget.order['bookingId'] ?? '').toString();
+  String get _status    => (widget.order['status'] as String? ?? 'INITIATED').toUpperCase();
 
-  String get _status =>
-      (widget.order['status'] as String? ?? 'PENDING').toUpperCase();
+  String get _shortId {
+    final id = _bookingId;
+    return id.length > 8 ? '#${id.substring(0, 8).toUpperCase()}' : '#$id';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDetail();
+  }
+
+  Future<void> _loadDetail() async {
+    if (_bookingId.isEmpty) return;
+    setState(() => _loadingDetail = true);
+    final detail = await ref.read(ordersPod.notifier).fetchSellerOrderDetail(_bookingId);
+    if (mounted) setState(() { _detail = detail; _loadingDetail = false; });
+  }
 
   Future<void> _updateStatus(String newStatus) async {
     if (_bookingId.isEmpty) return;
+    if (newStatus == 'CANCELLED') {
+      final confirmed = await showConfirmModal(
+        context,
+        title: 'Cancel Order',
+        message: 'Are you sure you want to cancel this order? This cannot be undone.',
+        confirmLabel: 'Yes, Cancel',
+        destructive: true,
+      );
+      if (!confirmed || !mounted) return;
+    }
+    if (newStatus == 'REVERSED') {
+      final confirmed = await showConfirmModal(
+        context,
+        title: 'Initiate Return',
+        message: 'This will mark the order as returned. Proceed only after the buyer has returned the item.',
+        confirmLabel: 'Initiate Return',
+        destructive: false,
+      );
+      if (!confirmed || !mounted) return;
+    }
     HapticUtils.medium();
     setState(() => _updating = true);
     final ok = await ref.read(ordersPod.notifier).updateOrderStatus(_bookingId, newStatus);
     setState(() => _updating = false);
-    if (ok && mounted) Navigator.of(context).pop();
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop();
+    } else {
+      final err = ref.read(ordersPod).error ?? 'Failed to update status';
+      AppToast.show(context, message: err, type: ToastType.error);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final order    = widget.order;
-    final customer = order['customerName'] as String? ?? 'Customer';
-    final amount   = order['amount'] as num? ?? 0;
-    final items    = (order['items'] as List<dynamic>?) ?? [];
-    final address  = order['deliveryAddress'] as String? ?? '';
-    final phone    = order['customerPhone'] as String? ?? '';
-    final date     = order['createdAt'] as String? ?? '';
+    final order      = widget.order;
+    final amountStr  = order['totalAmountRupees'] as String? ?? '0.00';
+    final itemCount  = (order['itemCount'] as num?)?.toInt() ?? 0;
+    final payMode    = order['paymentMode'] as String? ?? '';
+    final createdAt  = order['createdAt'] as String? ?? '';
+    final deliveryId = (_detail['deliveryAddress'] ?? order['deliveryAddress'])?.toString() ?? '';
+    final shortAddr  = deliveryId.length >= 8 ? deliveryId.substring(0, 8).toUpperCase() : deliveryId;
+
+    final items = (_detail['items'] as List<dynamic>?) ?? [];
 
     return DraggableScrollableSheet(
       initialChildSize: 0.65,
-      minChildSize:     0.4,
-      maxChildSize:     0.92,
+      minChildSize: 0.4,
+      maxChildSize: 0.92,
       builder: (_, scrollCtrl) => Container(
         decoration: const BoxDecoration(
           color: AppColors.surface,
@@ -61,18 +109,13 @@ class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
         ),
         child: Column(
           children: [
-            // Drag handle
             const SizedBox(height: 10),
             Container(
               width: 40, height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
+              decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(height: 16),
 
-            // Scrollable body
             Expanded(
               child: SingleChildScrollView(
                 controller: scrollCtrl,
@@ -85,42 +128,62 @@ class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
                       children: [
                         Expanded(
                           child: Text(
-                            _bookingId.isNotEmpty ? '#$_bookingId' : 'Order',
+                            _shortId,
                             style: const TextStyle(
-                              color: AppColors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
+                              color: AppColors.white, fontSize: 18, fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
-                        _StatusChip(status: _status),
+                        StatusBadge.fromString(_status),
                       ],
                     ),
-                    if (date.isNotEmpty) ...[
+                    if (createdAt.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(date, style: const TextStyle(color: AppColors.grey, fontSize: 12)),
+                      Text(
+                        _formatDate(createdAt),
+                        style: const TextStyle(color: AppColors.grey, fontSize: 12),
+                      ),
                     ],
                     const SizedBox(height: 20),
 
-                    // Customer info
-                    _Section(title: 'Customer', children: [
-                      _Row('Name',  customer),
-                      if (phone.isNotEmpty)   _Row('Phone', phone),
-                      if (address.isNotEmpty) _Row('Address', address),
+                    // Order summary
+                    _Section(title: 'Order Info', children: [
+                      _Row('Items',   '$itemCount item${itemCount != 1 ? 's' : ''}'),
+                      if (payMode.isNotEmpty)   _Row('Payment',  payMode),
+                      if (shortAddr.isNotEmpty) _Row('Deliver to', '#$shortAddr'),
                     ]),
                     const SizedBox(height: 16),
 
-                    // Items
-                    if (items.isNotEmpty) ...[
-                      _Section(title: 'Items', children: [
-                        ...items.map((item) {
-                          final i = item as Map;
-                          return _Row(
-                            i['productName']?.toString() ?? 'Item',
-                            '${i['quantity'] ?? 1} × ₹${i['price'] ?? 0}',
+                    // Line items
+                    if (_loadingDetail)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Center(child: SizedBox(
+                          width: 20, height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.grey),
+                        )),
+                      )
+                    else if (items.isNotEmpty) ...[
+                      _Section(
+                        title: 'Items Ordered',
+                        children: items.map((item) {
+                          final m        = item as Map<String, dynamic>;
+                          final qty      = (m['quantity'] as num?)?.toInt() ?? 1;
+                          final price    = m['unitPriceRupees'] as String? ?? '0.00';
+                          final total    = m['lineTotalRupees'] as String? ?? '0.00';
+                          final prodId   = (m['productId'] ?? '').toString();
+                          final shortPid = prodId.length > 8 ? prodId.substring(0, 8).toUpperCase() : prodId;
+                          final name     = (m['productName'] as String?)?.isNotEmpty == true
+                              ? m['productName'] as String
+                              : 'Product $shortPid';
+                          return _ItemRow(
+                            label: name,
+                            qty: qty,
+                            unitPrice: price,
+                            lineTotal: total,
                           );
-                        }),
-                      ]),
+                        }).toList(),
+                      ),
                       const SizedBox(height: 16),
                     ],
 
@@ -136,12 +199,8 @@ class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
                           const Text('Total', style: TextStyle(color: AppColors.grey, fontSize: 14)),
                           const Spacer(),
                           Text(
-                            '₹$amount',
-                            style: const TextStyle(
-                              color: AppColors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
+                            '₹$amountStr',
+                            style: const TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
@@ -164,37 +223,19 @@ class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
       ),
     );
   }
-}
 
-// ── Sub-widgets ───────────────────────────────────────────────────────────────
-
-class _StatusChip extends StatelessWidget {
-  final String status;
-  const _StatusChip({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final (color, bg) = _colors(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(status, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
-    );
-  }
-
-  (Color, Color) _colors(String s) {
-    switch (s) {
-      case 'DELIVERED':  return (AppColors.success, AppColors.success.withOpacity(0.12));
-      case 'SHIPPED':    return (AppColors.info,    AppColors.info.withOpacity(0.12));
-      case 'PROCESSING': return (AppColors.warning, AppColors.warning.withOpacity(0.12));
-      case 'CANCELLED':  return (AppColors.error,   AppColors.error.withOpacity(0.12));
-      default:           return (AppColors.grey,    AppColors.surface2);
+  String _formatDate(String iso) {
+    try {
+      final dt = DateTime.parse(iso).toLocal();
+      final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${dt.day} ${months[dt.month - 1]} ${dt.year}, ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+    } catch (_) {
+      return iso;
     }
   }
 }
+
+// ── Sub-widgets ───────────────────────────────────────────────────────────────
 
 class _Section extends StatelessWidget {
   final String title;
@@ -213,10 +254,7 @@ class _Section extends StatelessWidget {
         const SizedBox(height: 8),
         Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.surface2,
-            borderRadius: BorderRadius.circular(12),
-          ),
+          decoration: BoxDecoration(color: AppColors.surface2, borderRadius: BorderRadius.circular(12)),
           child: Column(children: children),
         ),
       ],
@@ -243,6 +281,35 @@ class _Row extends StatelessWidget {
           Expanded(
             child: Text(value, style: const TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.w500)),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ItemRow extends StatelessWidget {
+  final String label;
+  final int    qty;
+  final String unitPrice;
+  final String lineTotal;
+  const _ItemRow({required this.label, required this.qty, required this.unitPrice, required this.lineTotal});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+                Text('×$qty  @  ₹$unitPrice each', style: const TextStyle(color: AppColors.grey, fontSize: 11)),
+              ],
+            ),
+          ),
+          Text('₹$lineTotal', style: const TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -287,19 +354,23 @@ class _ActionButtons extends StatelessWidget {
 
   List<_Action> _actionsFor(String status) {
     switch (status) {
-      case 'PENDING':
+      case 'CONFIRMED':
         return [
-          const _Action('Accept Order',    'PROCESSING', AppColors.success),
-          const _Action('Reject Order',    'CANCELLED',  AppColors.error),
+          const _Action('Accept Order',          'PROCESSING',       AppColors.success),
+          const _Action('Cancel Order',           'CANCELLED',        AppColors.error),
         ];
       case 'PROCESSING':
         return [
-          const _Action('Mark as Packed',  'SHIPPED',    AppColors.info),
-          const _Action('Cancel Order',    'CANCELLED',  AppColors.error),
+          const _Action('Mark Out for Delivery',  'OUT_FOR_DELIVERY', AppColors.info),
+          const _Action('Cancel Order',           'CANCELLED',        AppColors.error),
         ];
-      case 'SHIPPED':
+      case 'OUT_FOR_DELIVERY':
         return [
-          const _Action('Mark Delivered',  'DELIVERED',  AppColors.success),
+          const _Action('Mark Delivered',         'DELIVERED',        AppColors.success),
+        ];
+      case 'DELIVERED':
+        return [
+          const _Action('Initiate Return',        'REVERSED',         AppColors.warning),
         ];
       default:
         return [];

@@ -1,7 +1,8 @@
 class ApiEndpoints {
   // ── Service bases ──────────────────────────────────────────────────────────
-  static const String productServiceBase = 'http://localhost:8081';
-  static const String orderServiceBase   = 'http://localhost:8082';
+  static const String productServiceBase  = 'http://localhost:8081';
+  static const String orderServiceBase    = 'http://localhost:8082';
+  static const String deliveryServiceBase = 'http://localhost:8083';
 
   // ── Auth  (ProductClientService · 8081) ───────────────────────────────────
   static const String login     = '/api/v1/auth/login';
@@ -10,6 +11,8 @@ class ApiEndpoints {
   static const String logout    = '/api/v1/auth/logout';
 
   // ── Seller Products  (ProductClientService · 8081) ────────────────────────
+  static const String sellerProducts               = '/api/v1/seller/product/my-products';
+  static const String sellerProductBase            = '/api/v1/seller/product'; // DELETE /{productId}  PATCH /{productId}/toggle-active
   static const String sellerProductCreate          = '/api/v1/seller/product/create';
   static const String sellerProductUploadImages    = '/api/v1/seller/product/upload-images';
   static const String sellerProductAddVariants     = '/api/v1/seller/product/add-variants';
@@ -20,6 +23,7 @@ class ApiEndpoints {
   static const String sellerProductCreateAttribute = '/api/v1/seller/product/create-product-attribute';
   static const String sellerProductMakeLive        = '/api/v1/seller/product/make-product-live';
   static const String sellerProductDraft           = '/api/v1/seller/product/draft-product';
+  static const String sellerProductDraftFull       = '/api/v1/seller/product/draft-product/full';
   static const String sellerProductDiscardDraft    = '/api/v1/seller/product/discard-draft-product';
   static const String sellerProductCatalogSearch   = '/api/v1/seller/product/catalog/search';
   static const String sellerProductFromCatalog     = '/api/v1/seller/product/listing/from-catalog';
@@ -56,6 +60,18 @@ class ApiEndpoints {
   static const String settingsPassword      = '/api/v1/seller/settings/security/password';
   static const String settingsSessions      = '/api/v1/seller/settings/security/sessions';
 
+  // ── Seller Orders & Stats  (OrderPaymentNotificationService · 8082) ────────
+  static const String sellerOrders             = '/api/v1/seller/orders';
+  static const String sellerOrderStatusCounts  = '/api/v1/seller/orders/status-counts';
+  static const String sellerStats              = '/api/v1/seller/stats';
+  static const String sellerProductLowStock = '/api/v1/seller/product/low-stock';
+  static const String sellerTopProducts = '/api/v1/seller/stats/top-products';
+  static const String sellerEarnings    = '/api/v1/seller/earnings';
+
+  // ── Wallet / Earnings  (OrderPaymentNotificationService · 8082) ──────────
+  static const String wallet             = '/api/v1/users/wallet';
+  static const String walletTransactions = '/api/v1/users/wallet/transactions';
+
   // ── Bookings / Orders  (OrderPaymentNotificationService · 8082) ───────────
   static const String bookings        = '/api/v1/booking';
   static const String bookingCheckout = '/api/v1/booking/checkout';
@@ -65,4 +81,14 @@ class ApiEndpoints {
   // ── Payments  (OrderPaymentNotificationService · 8082) ────────────────────
   static const String payments        = '/api/v1/payment';
   static const String validatePayment = '/api/v1/payment/validate-payment';
+
+  // ── In-App Notifications  (OrderPaymentNotificationService · 8082) ─────────
+  // GET  ?page=0&size=20&onlyUnread=false
+  static const String notifications       = '/api/v1/users/notifications';
+  // PATCH /{id}/read   PATCH /read-all
+  static const String notificationReadAll = '/api/v1/users/notifications/read-all';
+
+  // ── Device Tokens  (OrderPaymentNotificationService · 8082) ──────────────
+  // POST  body: { token, platform }
+  static const String deviceTokens = '/api/v1/users/devices';
 }

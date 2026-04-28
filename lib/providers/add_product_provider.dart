@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:math' show max;
 import 'dart:typed_data' show Uint8List;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -12,6 +14,8 @@ class AddProductState {
   final bool isSubmitting;
   final String? error;
   final int currentStep;
+  // Highest step ever reached — allows jumping forward within already-completed steps
+  final int maxReachedStep;
 
   // Fetched from API
   final List<dynamic> categories;
@@ -57,12 +61,19 @@ class AddProductState {
   // Set after create API call
   final String? createdProductId;
 
+  // Draft/resume flow
+  final bool draftChecked;
+  final bool hasDraft;
+
   const AddProductState({
     this.isLoading       = false,
     this.isCreating      = false,
     this.isSubmitting    = false,
     this.error,
-    this.currentStep     = 0,
+    this.currentStep      = 0,
+    this.maxReachedStep   = 0,
+    this.draftChecked    = false,
+    this.hasDraft        = false,
     this.categories      = const [],
     this.brands          = const [],
     this.attributes      = const [],
@@ -93,6 +104,7 @@ class AddProductState {
     bool? isSubmitting,
     String? error,
     int? currentStep,
+    int? maxReachedStep,
     List<dynamic>? categories,
     List<dynamic>? brands,
     List<dynamic>? attributes,
@@ -115,6 +127,8 @@ class AddProductState {
     String? sku,
     String? weight,
     String? createdProductId,
+    bool? draftChecked,
+    bool? hasDraft,
   }) {
     return AddProductState(
       isLoading:        isLoading        ?? this.isLoading,
@@ -122,6 +136,9 @@ class AddProductState {
       isSubmitting:     isSubmitting     ?? this.isSubmitting,
       error:            error,
       currentStep:      currentStep      ?? this.currentStep,
+      maxReachedStep:   maxReachedStep   ?? this.maxReachedStep,
+      draftChecked:     draftChecked     ?? this.draftChecked,
+      hasDraft:         hasDraft         ?? this.hasDraft,
       categories:       categories       ?? this.categories,
       brands:           brands           ?? this.brands,
       attributes:       attributes       ?? this.attributes,
@@ -153,6 +170,18 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
   Dio get _client => ApiClient.instance.client;
 
+  Map<String, dynamic>? _pendingDraftData;
+
+  // ── Saved-to-backend snapshots (dirty-check before re-hitting APIs) ───────
+  String? _savedName;
+  String? _savedDesc;
+  String? _savedAttrValuesJson;
+  String? _savedVariantsJson;
+  String? _savedImagePathsJson;
+  String? _savedAttrImagesJson;
+  String? _savedBrandId;
+  String? _savedTagsJson;
+
   // ── Init ─────────────────────────────────────────────────────────────────
   Future<void> init() async {
     state = state.copyWith(isLoading: true, error: null);
@@ -175,6 +204,151 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     state = state.copyWith(isLoading: false, categories: cats, brands: brands);
   }
 
+  // ── Draft / Resume ───────────────────────────────────────────────────────
+  Future<void> checkForDraft() async {
+    try {
+      final res  = await _client.get(ApiEndpoints.sellerProductDraftFull);
+      final body = res.data as Map<String, dynamic>;
+      final data = (body['data'] ?? body) as Map<String, dynamic>?;
+      if (data != null && data['productId'] != null) {
+        _pendingDraftData = data;
+        state = state.copyWith(draftChecked: true, hasDraft: true);
+        return;
+      }
+    } catch (_) {}
+    state = state.copyWith(draftChecked: true, hasDraft: false);
+  }
+
+  Future<void> resumeDraft() async {
+    final data = _pendingDraftData;
+    if (data == null) return;
+    _pendingDraftData = null;
+
+    // ── Step mapping ─────────────────────────────────────────────────────────
+    // Each enum value represents "this step was the last one completed".
+    // We send the user to the NEXT step so they continue naturally.
+    // PRODUCT_BRAND_AND_TAGS = everything done → go to Review (step 6).
+    final currentStepStr = data['currentStep']?.toString() ?? '';
+    const stepMap = {
+      'PRODUCT_NAME':           1,
+      'PRODUCT_ATTRIBUTE':      2,
+      'PRODUCT_VARIANT':        3,
+      'PRODUCT_IMAGE':          4,
+      'PRODUCT_BRAND_AND_TAGS': 6,
+    };
+    final targetStep = stepMap[currentStepStr] ?? 1;
+
+    // ── Basic info ────────────────────────────────────────────────────────────
+    final productId   = data['productId']?.toString();
+    final basicInfo   = data['basicInfo'] as Map<String, dynamic>? ?? {};
+    final name        = basicInfo['name']?.toString()        ?? '';
+    final desc        = basicInfo['description']?.toString() ?? '';
+    final categoryId  = (basicInfo['categoryId']  ?? data['categoryId'])?.toString();
+    final categoryName = (basicInfo['categoryName'] ?? data['categoryName'])?.toString() ?? '';
+
+    // ── Attributes ────────────────────────────────────────────────────────────
+    // Response: { categoryAttributeId, value (string), isImageAttribute, ... }
+    final attrsRaw        = data['attributes'] as List<dynamic>? ?? [];
+    final attributeValues = <String, String>{};
+    // Build value→categoryAttributeId index for image attributes (used for media mapping)
+    final imageAttrIndex  = <String, String>{}; // attrValue → categoryAttributeId
+
+    for (final a in attrsRaw) {
+      final attr      = a as Map<String, dynamic>;
+      final catAttrId = attr['categoryAttributeId']?.toString() ?? '';
+      final val       = attr['value']?.toString()              ?? '';
+      if (catAttrId.isNotEmpty && val.isNotEmpty) {
+        attributeValues[catAttrId] = val;
+        if (attr['isImageAttribute'] == true) {
+          imageAttrIndex[val] = catAttrId;
+        }
+      }
+    }
+
+    // ── Variants ─────────────────────────────────────────────────────────────
+    final variantsRaw = data['variants'] as List<dynamic>? ?? [];
+    final variants    = variantsRaw.map((v) => Map<String, dynamic>.from(v as Map)).toList();
+
+    // ── Media ─────────────────────────────────────────────────────────────────
+    // Response: { coverImageUrl: "...", attributeMedia: { "Red": ["url"] } }
+    final mediaRaw    = data['media'] as Map<String, dynamic>? ?? {};
+    final coverUrl    = mediaRaw['coverImageUrl']?.toString();
+    final coverImages = coverUrl != null && coverUrl.isNotEmpty ? [coverUrl] : <String>[];
+
+    // attributeMedia keys are attribute values (e.g. "Red").
+    // State expects keys as "{categoryAttributeId}::{value}".
+    final attrMediaRaw  = mediaRaw['attributeMedia'] as Map<String, dynamic>? ?? {};
+    final attributeImages = <String, List<String>>{};
+    attrMediaRaw.forEach((value, urls) {
+      final catAttrId = imageAttrIndex[value];
+      final key = catAttrId != null ? '$catAttrId::$value' : value;
+      attributeImages[key] = (urls as List<dynamic>).map((u) => u.toString()).toList();
+    });
+
+    // ── Tags ──────────────────────────────────────────────────────────────────
+    // Response: [{ id, name }]
+    final tags = (data['tags'] as List<dynamic>?)
+        ?.map((t) => (t as Map<String, dynamic>)['name']?.toString() ?? '')
+        .where((t) => t.isNotEmpty)
+        .toList() ?? [];
+
+    // ── Brand ─────────────────────────────────────────────────────────────────
+    final brandRaw  = data['brand'] as Map<String, dynamic>? ?? {};
+    final brandId   = brandRaw['id']?.toString();
+    final brandName = brandRaw['name']?.toString();
+
+    // ── Category attributes (needed for the Attributes step UI) ──────────────
+    List<dynamic> attrs = [];
+    if (categoryId != null && targetStep >= 2) {
+      try {
+        final res  = await _client.get('${ApiEndpoints.categoryAttributes}/$categoryId');
+        final body = res.data as Map<String, dynamic>;
+        final d    = body['data'] as Map<String, dynamic>? ?? {};
+        attrs = (d['attributeIds'] as List<dynamic>?) ?? [];
+      } catch (_) {}
+    }
+
+    // Mark everything as already-saved so re-visiting steps doesn't re-call APIs
+    _savedName           = name;
+    _savedDesc           = desc;
+    _savedAttrValuesJson = jsonEncode(attributeValues);
+    _savedVariantsJson   = jsonEncode(variants);
+    _savedImagePathsJson = jsonEncode(coverImages);
+    _savedAttrImagesJson = jsonEncode(attributeImages);
+    _savedBrandId        = brandId;
+    _savedTagsJson       = jsonEncode(tags);
+
+    state = AddProductState(
+      categories:       state.categories,
+      brands:           state.brands,
+      draftChecked:     true,
+      hasDraft:         false,
+      createdProductId: productId,
+      productName:      name,
+      description:      desc,
+      categoryId:       categoryId,
+      categoryName:     categoryName,
+      attributes:       attrs,
+      attributeValues:  attributeValues,
+      variants:         variants,
+      imagePaths:       coverImages,
+      attributeImages:  attributeImages,
+      tags:             tags,
+      brandId:          brandId,
+      brandName:        brandName,
+      currentStep:      targetStep,
+      maxReachedStep:   targetStep,
+    );
+  }
+
+  Future<void> discardDraft() async {
+    _pendingDraftData = null;
+    try {
+      await _client.delete(ApiEndpoints.sellerProductDiscardDraft);
+    } catch (_) {}
+    state = state.copyWith(draftChecked: true, hasDraft: false);
+  }
+
   // ── Step 0 – Category ─────────────────────────────────────────────────────
   Future<void> saveCategory(String id, String name) async {
     state = state.copyWith(categoryId: id, categoryName: name, isLoading: true, error: null);
@@ -183,14 +357,24 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       final body  = res.data as Map<String, dynamic>;
       final data  = body['data'] as Map<String, dynamic>? ?? {};
       final attrs = (data['attributeIds'] as List<dynamic>?) ?? [];
-      state = state.copyWith(isLoading: false, attributes: attrs, currentStep: 1);
+      state = state.copyWith(isLoading: false, attributes: attrs, currentStep: 1, maxReachedStep: max(state.maxReachedStep, 1));
     } on DioException {
-      state = state.copyWith(isLoading: false, attributes: [], currentStep: 1);
+      state = state.copyWith(isLoading: false, attributes: [], currentStep: 1, maxReachedStep: max(state.maxReachedStep, 1));
     }
   }
 
   // ── Step 1 – Basic Info ───────────────────────────────────────────────────
   Future<bool> createProduct(String name, String desc) async {
+    // Skip API if nothing changed and product already exists
+    if (state.createdProductId != null &&
+        name == _savedName && desc == _savedDesc) {
+      state = state.copyWith(
+        productName: name, description: desc,
+        currentStep: 2, maxReachedStep: max(state.maxReachedStep, 2),
+      );
+      return true;
+    }
+
     state = state.copyWith(isCreating: true, error: null);
     try {
       final formMap = <String, dynamic>{
@@ -210,12 +394,15 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         final data      = body['data'] as Map<String, dynamic>? ?? {};
         final productId = (data['productId'] ?? data['id'])?.toString()
             ?? state.createdProductId;
+        _savedName = name;
+        _savedDesc = desc;
         state = state.copyWith(
           isCreating:       false,
           productName:      name,
           description:      desc,
           createdProductId: productId,
           currentStep:      2,
+          maxReachedStep:   max(state.maxReachedStep, 2),
         );
         return true;
       }
@@ -235,6 +422,15 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
   // ── Step 2 – Attributes ───────────────────────────────────────────────────
   Future<bool> saveAttributesAndContinue(Map<String, String> values) async {
+    final valuesJson = jsonEncode(values);
+    if (state.createdProductId != null && valuesJson == _savedAttrValuesJson) {
+      state = state.copyWith(
+        attributeValues: values,
+        currentStep: 3, maxReachedStep: max(state.maxReachedStep, 3),
+      );
+      return true;
+    }
+
     state = state.copyWith(attributeValues: values, isCreating: true, error: null);
     try {
       final productId = state.createdProductId;
@@ -262,7 +458,8 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
           });
         }
       }
-      state = state.copyWith(isCreating: false, currentStep: 3);
+      _savedAttrValuesJson = valuesJson;
+      state = state.copyWith(isCreating: false, currentStep: 3, maxReachedStep: max(state.maxReachedStep, 3));
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
@@ -275,6 +472,15 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
   // ── Step 3 – Variants ─────────────────────────────────────────────────────
   Future<bool> saveVariantsAndContinue(List<Map<String, dynamic>> variants) async {
+    final variantsJson = jsonEncode(variants);
+    if (state.createdProductId != null && variantsJson == _savedVariantsJson) {
+      state = state.copyWith(
+        variants: variants,
+        currentStep: 4, maxReachedStep: max(state.maxReachedStep, 4),
+      );
+      return true;
+    }
+
     state = state.copyWith(variants: variants, isCreating: true, error: null);
     try {
       final productId = state.createdProductId;
@@ -284,7 +490,8 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
           'variants':  variants,
         });
       }
-      state = state.copyWith(isCreating: false, currentStep: 4);
+      _savedVariantsJson = variantsJson;
+      state = state.copyWith(isCreating: false, currentStep: 4, maxReachedStep: max(state.maxReachedStep, 4));
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
@@ -349,25 +556,29 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
   // Upload ALL media – cover photos + per-attribute-value photos/videos.
   Future<bool> uploadImagesAndContinue() async {
+    final pathsJson    = jsonEncode(state.imagePaths);
+    final attrImgJson  = jsonEncode(state.attributeImages);
+    if (state.createdProductId != null &&
+        pathsJson == _savedImagePathsJson &&
+        attrImgJson == _savedAttrImagesJson) {
+      state = state.copyWith(
+        currentStep: 5, maxReachedStep: max(state.maxReachedStep, 5),
+      );
+      return true;
+    }
+
     state = state.copyWith(isCreating: true, error: null);
     try {
       final productId = state.createdProductId;
       if (productId != null) {
-        // ── Cover / general product images ──────────────────────────────────
         final coverFiles = await _buildFiles(state.imagePaths);
 
-        // ── Per-attribute-value images (e.g. Red→5 photos, Black→8 photos) ─
-        // Sent as parallel arrays so backend can group them:
-        //   attributeImageKeys[i]  →  "{categoryAttributeId}::{value}"
-        //   attributeImages[i]     →  the actual file
         final attrKeys  = <String>[];
         final attrFiles = <MultipartFile>[];
-
         for (final entry in state.attributeImages.entries) {
-          final key   = entry.key; // e.g. "colorAttrId::Red"
           final files = await _buildFiles(entry.value);
           for (final f in files) {
-            attrKeys.add(key);
+            attrKeys.add(entry.key);
             attrFiles.add(f);
           }
         }
@@ -375,22 +586,24 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         final hasAny = coverFiles.isNotEmpty || attrFiles.isNotEmpty;
         if (hasAny) {
           final formMap = <String, dynamic>{'productId': productId};
-          if (coverFiles.isNotEmpty) formMap['images']              = coverFiles;
-          if (attrFiles.isNotEmpty)  formMap['attributeImageKeys']  = attrKeys;
-          if (attrFiles.isNotEmpty)  formMap['attributeImages']     = attrFiles;
+          if (coverFiles.isNotEmpty) formMap['images']             = coverFiles;
+          if (attrFiles.isNotEmpty)  formMap['attributeImageKeys'] = attrKeys;
+          if (attrFiles.isNotEmpty)  formMap['attributeImages']    = attrFiles;
 
           await _client.post(
             ApiEndpoints.sellerProductUploadImages,
             data: FormData.fromMap(formMap),
             options: Options(
               contentType:    'multipart/form-data',
-              sendTimeout:    null,   // no timeout — large uploads can take time
+              sendTimeout:    null,
               receiveTimeout: null,
             ),
           );
         }
       }
-      state = state.copyWith(isCreating: false, currentStep: 5);
+      _savedImagePathsJson = pathsJson;
+      _savedAttrImagesJson = attrImgJson;
+      state = state.copyWith(isCreating: false, currentStep: 5, maxReachedStep: max(state.maxReachedStep, 5));
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
@@ -401,10 +614,11 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     }
   }
 
-  // Build MultipartFile list from a list of local paths / blob URLs.
+  // Build MultipartFile list — skips CDN URLs (already uploaded).
   Future<List<MultipartFile>> _buildFiles(List<String> paths) async {
     final files = <MultipartFile>[];
     for (final path in paths) {
+      if (path.startsWith('http')) continue; // already on CDN, skip
       final bytes    = state.mediaBytes[path];
       final type     = state.mediaTypes[path] ?? 'image';
       final mime     = type == 'video' ? 'video/mp4' : 'image/jpeg';
@@ -444,6 +658,15 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       return false;
     }
 
+    final tagsJson = jsonEncode(tags);
+    if (brandId == _savedBrandId && tagsJson == _savedTagsJson) {
+      state = state.copyWith(
+        brandId: brandId, brandName: brandName, tags: tags,
+        currentStep: 6, maxReachedStep: max(state.maxReachedStep, 6),
+      );
+      return true;
+    }
+
     state = state.copyWith(
         brandId:    brandId,
         brandName:  brandName,
@@ -451,22 +674,17 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         isCreating: true,
         error:      null);
     try {
-      // ── Tags ──────────────────────────────────────────────────────────────
-      // POST /api/v1/seller/product/add-tag
-      // Body: { "product_id": "<uuid>", "tags": ["tag1", "tag2"] }
-      if (tags.isNotEmpty) {
+      // Tags changed — only call if tags differ
+      if (tagsJson != _savedTagsJson && tags.isNotEmpty) {
         await _client.post(
           ApiEndpoints.sellerProductAddTag,
-          data: {
-            'product_id': productId,   // snake_case matches ProductTagRequestDto
-            'tags':        tags,
-          },
+          data: {'product_id': productId, 'tags': tags},
           options: Options(contentType: Headers.jsonContentType),
         );
       }
 
-      // ── Brand ──────────────────────────────────────────────────────────────
-      if (brandId != null && brandId.isNotEmpty) {
+      // Brand changed — only call if brandId differs
+      if (brandId != _savedBrandId && brandId != null && brandId.isNotEmpty) {
         await _client.post(
           ApiEndpoints.sellerProductAttachBrand,
           queryParameters: {'productId': productId, 'brandId': brandId},
@@ -474,7 +692,9 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         );
       }
 
-      state = state.copyWith(isCreating: false, currentStep: 6);
+      _savedBrandId  = brandId;
+      _savedTagsJson = tagsJson;
+      state = state.copyWith(isCreating: false, currentStep: 6, maxReachedStep: max(state.maxReachedStep, 6));
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
@@ -498,7 +718,7 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
   // ── Navigation helpers ────────────────────────────────────────────────────
   void goToStep(int step) {
-    if (step >= 0 && step < state.currentStep) {
+    if (step >= 0 && step <= state.maxReachedStep && step != state.currentStep) {
       state = state.copyWith(currentStep: step);
     }
   }

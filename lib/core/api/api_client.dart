@@ -7,14 +7,18 @@ class ApiClient {
   ApiClient._();
   static final ApiClient instance = ApiClient._();
 
-  late final Dio _productDio = _buildDio(ApiEndpoints.productServiceBase);
-  late final Dio _orderDio   = _buildDio(ApiEndpoints.orderServiceBase);
+  late final Dio _productDio  = _buildDio(ApiEndpoints.productServiceBase);
+  late final Dio _orderDio    = _buildDio(ApiEndpoints.orderServiceBase);
+  late final Dio _deliveryDio = _buildDio(ApiEndpoints.deliveryServiceBase);
 
   /// Default client → ProductClientService (port 8081)
-  Dio get client      => _productDio;
+  Dio get client          => _productDio;
 
   /// Order/Payment client → OrderPaymentNotificationService (port 8082)
-  Dio get orderClient => _orderDio;
+  Dio get orderClient     => _orderDio;
+
+  /// Delivery/Inventory client → DeliveryInventoryService (port 8083)
+  Dio get deliveryClient  => _deliveryDio;
 
   Dio _buildDio(String baseUrl) {
     final dio = Dio(

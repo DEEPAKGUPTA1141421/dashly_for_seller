@@ -7,6 +7,7 @@ import '../../core/widgets/app_button.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/app_colors.dart';
 import '../../utils/haptic_utils.dart';
+import '../../utils/storage_service.dart';
 
 class VerifyOtpScreen extends ConsumerStatefulWidget {
   const VerifyOtpScreen({super.key});
@@ -79,8 +80,13 @@ class _VerifyOtpScreenState extends ConsumerState<VerifyOtpScreen>
     final success = await ref.read(authPod.notifier).verifyOtp(phone, _otp);
     if (success && mounted) {
       HapticUtils.success();
-      // Navigate to onboarding or home based on onboarding status
-      Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
+      final complete = await StorageService.isOnboardingComplete();
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        complete ? '/home' : '/onboarding',
+        (_) => false,
+      );
     } else if (mounted) {
       HapticUtils.heavy();
       _shakeController.forward(from: 0);

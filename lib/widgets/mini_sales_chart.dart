@@ -80,8 +80,8 @@ class MiniSalesChart extends StatelessWidget {
   List<FlSpot> _buildSpots() {
     if (data.isEmpty) return _demoSpots();
     return data.asMap().entries.map((e) {
-      final val = (e.value['sales'] as num?)?.toDouble() ?? 0;
-      return FlSpot(e.key.toDouble(), val);
+      final paise = (e.value['revenuePaise'] as num?)?.toDouble() ?? 0;
+      return FlSpot(e.key.toDouble(), paise / 100);
     }).toList();
   }
 
@@ -93,12 +93,28 @@ class MiniSalesChart extends StatelessWidget {
     ];
   }
 
+  String _dayLabel(dynamic entry) {
+    final day = entry['day'] as String? ?? '';
+    if (day.length < 10) return day;
+    try {
+      final dt = DateTime.parse(day);
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${dt.day} ${months[dt.month - 1]}';
+    } catch (_) {
+      return day.substring(5); // "MM-DD"
+    }
+  }
+
   Widget _bottomTitle(double value) {
-    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final i = value.toInt();
-    if (i < 0 || i >= labels.length) return const SizedBox.shrink();
+    if (data.isEmpty) {
+      const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      if (i < 0 || i >= labels.length) return const SizedBox.shrink();
+      return Text(labels[i], style: const TextStyle(color: AppColors.greyDark, fontSize: 10));
+    }
+    if (i < 0 || i >= data.length) return const SizedBox.shrink();
     return Text(
-      labels[i],
+      _dayLabel(data[i]),
       style: const TextStyle(color: AppColors.greyDark, fontSize: 10),
     );
   }

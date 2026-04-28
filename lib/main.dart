@@ -6,6 +6,7 @@ import 'main_layout.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/verify_otp_screen.dart';
 import 'screens/onboarding/onboarding_screen.dart';
+import 'core/theme/app_theme.dart';
 import 'utils/app_colors.dart';
 import 'utils/storage_service.dart';
 
@@ -32,28 +33,7 @@ class DashlySellerApp extends StatelessWidget {
       navigatorKey: _navigatorKey,
       title: 'Dashly Seller',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: AppColors.bg,
-        colorScheme: const ColorScheme.dark(
-          surface: AppColors.surface,
-          primary: AppColors.white,
-          onPrimary: AppColors.bg,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: AppColors.bg,
-          elevation: 0,
-          iconTheme: IconThemeData(color: AppColors.white),
-          titleTextStyle: TextStyle(
-            color: AppColors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        dividerColor: AppColors.border,
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-      ),
+      theme: AppTheme.dark,
       home: const _SplashScreen(),
       routes: {
         '/login':      (_) => const LoginScreen(),

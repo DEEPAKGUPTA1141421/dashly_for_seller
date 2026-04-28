@@ -5,6 +5,7 @@ import '../../../core/widgets/app_button.dart';
 import '../../../providers/onboarding_provider.dart';
 import '../../../utils/app_colors.dart';
 import '../../../utils/haptic_utils.dart';
+import '../../../utils/storage_service.dart';
 
 class ReviewStep extends ConsumerWidget {
   const ReviewStep({super.key});
@@ -14,8 +15,10 @@ class ReviewStep extends ConsumerWidget {
     final state = ref.watch(onboardingPod);
     final data  = state.formData;
 
-    void goToHome() {
+    Future<void> goToHome() async {
+      await StorageService.saveOnboardingComplete(true);
       HapticUtils.success();
+      if (!context.mounted) return;
       Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
     }
 

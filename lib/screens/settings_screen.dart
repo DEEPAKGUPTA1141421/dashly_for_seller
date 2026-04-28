@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import '../core/widgets/app_toast.dart';
+import '../core/widgets/confirm_modal.dart';
 import '../providers/auth_provider.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
@@ -9,7 +11,7 @@ import '../utils/haptic_utils.dart';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-enum _Tab { personal, business, bank, notifications }
+enum _Tab { personal, business, bank, notifications, security }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -33,14 +35,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(settingsPod);
 
-    // Show success / error snackbars
+    // Show success / error toasts
     ref.listen(settingsPod, (prev, next) {
       if (next.successMessage != null && next.successMessage != prev?.successMessage) {
-        ScaffoldMessenger.of(context).showSnackBar(_snack(next.successMessage!, isError: false));
+        AppToast.show(context, message: next.successMessage!, type: ToastType.success);
         ref.read(settingsPod.notifier).clearMessages();
       }
       if (next.error != null && next.error != prev?.error) {
-        ScaffoldMessenger.of(context).showSnackBar(_snack(next.error!, isError: true));
+        AppToast.show(context, message: next.error!, type: ToastType.error);
         ref.read(settingsPod.notifier).clearMessages();
       }
     });
@@ -118,14 +120,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _buildTab(SettingsState state) {
     switch (_tab) {
-      case _Tab.personal:
-        return _PersonalTab(data: state.personal);
-      case _Tab.business:
-        return _BusinessTab(data: state.business);
-      case _Tab.bank:
-        return _BankTab(data: state.bank);
-      case _Tab.notifications:
-        return _NotificationsTab(data: state.notifications);
+      case _Tab.personal:      return _PersonalTab(data: state.personal);
+      case _Tab.business:      return _BusinessTab(data: state.business);
+      case _Tab.bank:          return _BankTab(data: state.bank);
+      case _Tab.notifications: return _NotificationsTab(data: state.notifications);
+      case _Tab.security:      return const _SecurityTab();
     }
   }
 
@@ -135,15 +134,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case _Tab.business:      return 'Business';
       case _Tab.bank:          return 'Bank';
       case _Tab.notifications: return 'Notifications';
+      case _Tab.security:      return 'Security';
     }
   }
 
-  SnackBar _snack(String msg, {required bool isError}) => SnackBar(
-    content: Text(msg, style: const TextStyle(color: AppColors.white)),
-    backgroundColor: isError ? AppColors.error : AppColors.success,
-    behavior: SnackBarBehavior.floating,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-  );
 }
 
 // ─── Personal Tab ─────────────────────────────────────────────────────────────
@@ -656,25 +650,100 @@ class _SaveButton extends StatelessWidget {
   }
 }
 
+// ─── Security Tab ─────────────────────────────────────────────────────────────
+
+class _SecurityTab extends ConsumerStatefulWidget {
+  const _SecurityTab();
+
+  @override
+  ConsumerState<_SecurityTab> createState() => _SecurityTabState();
+}
+
+class _SecurityTabState extends ConsumerState<_SecurityTab> {
+  final _current  = TextEditingController();
+  final _newPass  = TextEditingController();
+  final _confirm  = TextEditingController();
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _newPass.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_newPass.text != _confirm.text) {
+      AppToast.show(context, message: 'Passwords do not match', type: ToastType.error);
+      return;
+    }
+    if (_newPass.text.length < 6) {
+      AppToast.show(context, message: 'Password must be at least 6 characters', type: ToastType.error);
+      return;
+    }
+    HapticUtils.medium();
+    final ok = await ref.read(settingsPod.notifier).changePassword(
+      currentPassword: _current.text.trim(),
+      newPassword:     _newPass.text.trim(),
+    );
+    if (ok && mounted) {
+      _current.clear();
+      _newPass.clear();
+      _confirm.clear();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final saving = ref.watch(settingsPod).savingSection == 'security';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.info.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.info.withOpacity(0.2)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.lock_outline_rounded, color: AppColors.info, size: 16),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Use a strong password with letters, numbers, and symbols.',
+                  style: TextStyle(color: AppColors.grey, fontSize: 12, height: 1.4),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        _Field(label: 'CURRENT PASSWORD', ctrl: _current, hint: 'Enter current password', obscure: true),
+        _Field(label: 'NEW PASSWORD',     ctrl: _newPass,  hint: 'Min. 6 characters',     obscure: true),
+        _Field(label: 'CONFIRM PASSWORD', ctrl: _confirm,  hint: 'Re-enter new password',  obscure: true),
+        const SizedBox(height: 8),
+        _SaveButton(label: 'Update Password', onTap: _save, isSaving: saving),
+      ].animate(interval: 40.ms).fadeIn().slideY(begin: 0.05, end: 0),
+    );
+  }
+}
+
 class _LogoutButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return GestureDetector(
       onTap: () async {
         HapticUtils.medium();
-        final confirm = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            backgroundColor: AppColors.surface,
-            title: const Text('Log Out', style: TextStyle(color: AppColors.white)),
-            content: const Text('Are you sure you want to log out?', style: TextStyle(color: AppColors.grey)),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel', style: TextStyle(color: AppColors.grey))),
-              TextButton(onPressed: () => Navigator.pop(context, true),  child: const Text('Log Out', style: TextStyle(color: AppColors.error))),
-            ],
-          ),
+        final confirm = await showConfirmModal(
+          context,
+          title: 'Log Out',
+          message: 'Are you sure you want to log out?',
+          confirmLabel: 'Log Out',
+          destructive: true,
         );
-        if (confirm == true) {
+        if (confirm) {
           await ref.read(authPod.notifier).logout();
           if (context.mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
         }

@@ -49,14 +49,14 @@ class ProductsNotifier extends StateNotifier<ProductsState> {
 
   Dio get _client => ApiClient.instance.client;
 
-  // GET /api/v1/seller/product/draft-product  (seller's own listed products)
+  // GET /api/v1/seller/product/my-products  (seller's own live products)
   // GET /api/v1/seller/product/categories
   // GET /api/v1/brand
   Future<void> fetchProducts() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
       final results = await Future.wait([
-        _client.get(ApiEndpoints.sellerProductDraft),
+        _client.get(ApiEndpoints.sellerProducts, queryParameters: {'page': 0, 'size': 50}),
         _client.get(ApiEndpoints.sellerCategories),
         _client.get(ApiEndpoints.brands),
       ]);
@@ -118,13 +118,67 @@ class ProductsNotifier extends StateNotifier<ProductsState> {
     }
   }
 
-  // DELETE /api/v1/seller/product/discard-draft-product  (discards current draft)
+  // DELETE /api/v1/seller/product/{productId}
   Future<bool> deleteProduct(String productId) async {
     try {
-      await _client.delete(ApiEndpoints.sellerProductDiscardDraft);
-      await fetchProducts();
-      return true;
-    } catch (_) {
+      final res  = await _client.delete('${ApiEndpoints.sellerProductBase}/$productId');
+      final body = res.data as Map<String, dynamic>;
+      if (body['success'] == true) {
+        state = state.copyWith(
+          products: state.products.where((p) => (p as Map)['id']?.toString() != productId).toList(),
+        );
+        return true;
+      }
+      state = state.copyWith(error: body['message']);
+      return false;
+    } on DioException catch (e) {
+      state = state.copyWith(error: AppException.fromDioError(e).message);
+      return false;
+    }
+  }
+
+  // PATCH /api/v1/seller/product/{productId}/toggle-active
+  Future<bool> toggleActive(String productId) async {
+    try {
+      final res  = await _client.patch('${ApiEndpoints.sellerProductBase}/$productId/toggle-active');
+      final body = res.data as Map<String, dynamic>;
+      if (body['success'] == true) {
+        final newActive = (body['data'] as Map<String, dynamic>?)?['isActive'] as bool? ?? false;
+        state = state.copyWith(
+          products: state.products.map((p) {
+            final m = p as Map<String, dynamic>;
+            return m['id']?.toString() == productId ? {...m, 'isActive': newActive} : m;
+          }).toList(),
+        );
+        return true;
+      }
+      state = state.copyWith(error: body['message']);
+      return false;
+    } on DioException catch (e) {
+      state = state.copyWith(error: AppException.fromDioError(e).message);
+      return false;
+    }
+  }
+
+  // PATCH /api/v1/seller/product/{productId}/quick-update
+  Future<bool> quickUpdate(String productId, {String? name, int? priceInPaise, int? stock}) async {
+    state = state.copyWith(isSubmitting: true, error: null);
+    try {
+      final body = <String, dynamic>{};
+      if (name         != null) body['name']         = name;
+      if (priceInPaise != null) body['priceInPaise'] = priceInPaise;
+      if (stock        != null) body['stock']        = stock;
+      final res  = await _client.patch('${ApiEndpoints.sellerProductBase}/$productId/quick-update', data: body);
+      final resp = res.data as Map<String, dynamic>;
+      if (resp['success'] == true) {
+        state = state.copyWith(isSubmitting: false);
+        await fetchProducts();
+        return true;
+      }
+      state = state.copyWith(isSubmitting: false, error: resp['message']);
+      return false;
+    } on DioException catch (e) {
+      state = state.copyWith(isSubmitting: false, error: AppException.fromDioError(e).message);
       return false;
     }
   }

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/api_endpoints.dart';
+import '../../providers/settings_provider.dart';
 import '../../utils/app_colors.dart';
 import '../../utils/haptic_utils.dart';
 
@@ -84,6 +87,9 @@ class _LocationSetupScreenState extends ConsumerState<LocationSetupScreen>
       setState(() => _phase = 2);
       HapticUtils.success();
       _successCtrl.forward();
+
+      // Refresh onboarding stage so the dashboard stops re-showing this screen.
+      unawaited(ref.read(settingsPod.notifier).fetchAll());
 
       // Auto-navigate to home after showing the result
       await Future.delayed(const Duration(milliseconds: 2800));

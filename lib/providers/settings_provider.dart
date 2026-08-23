@@ -21,6 +21,7 @@ class SettingsState {
   final Map<String, dynamic> notifications;
   final Map<String, dynamic> preferences;
   final bool onboardingComplete;
+  final String? onboardingStage;
 
   const SettingsState({
     this.isLoading         = false,
@@ -33,6 +34,7 @@ class SettingsState {
     this.notifications     = const {},
     this.preferences       = const {},
     this.onboardingComplete = true, // default true to avoid flashing banner before load
+    this.onboardingStage,
   });
 
   SettingsState copyWith({
@@ -49,6 +51,7 @@ class SettingsState {
     Map<String, dynamic>? notifications,
     Map<String, dynamic>? preferences,
     bool? onboardingComplete,
+    String? onboardingStage,
   }) {
     return SettingsState(
       isLoading:          isLoading          ?? this.isLoading,
@@ -61,6 +64,7 @@ class SettingsState {
       notifications:      notifications      ?? this.notifications,
       preferences:        preferences        ?? this.preferences,
       onboardingComplete: onboardingComplete ?? this.onboardingComplete,
+      onboardingStage:    onboardingStage    ?? this.onboardingStage,
     );
   }
 }
@@ -89,6 +93,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
         notifications:      _asMap(data['notifications']),
         preferences:        _asMap(data['preferences']),
         onboardingComplete: (data['onboardingComplete'] as bool?) ?? false,
+        onboardingStage:    data['onboardingStage'] as String?,
       );
     } on DioException catch (e) {
       state = state.copyWith(isLoading: false, error: AppException.fromDioError(e).message);

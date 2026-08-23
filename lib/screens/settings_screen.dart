@@ -333,7 +333,7 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
             const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Profile Photo', style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                Text('Outlet Image', style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w600)),
                 SizedBox(height: 4),
                 Text('JPG or PNG, max 2 MB', style: TextStyle(color: AppColors.grey, fontSize: 12)),
               ],

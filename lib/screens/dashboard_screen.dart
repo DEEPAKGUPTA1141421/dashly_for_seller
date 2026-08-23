@@ -13,6 +13,7 @@ import '../utils/storage_service.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/mini_sales_chart.dart';
 import '../widgets/order_list_tile.dart';
+import 'auth/location_screen.dart';
 import 'earnings_screen.dart';
 import 'notifications_screen.dart';
 
@@ -33,7 +34,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     Future.microtask(() async {
       ref.read(dashboardPod.notifier).fetchDashboard();
       ref.read(notificationsPod.notifier).fetchNotifications();
-      if (ref.read(settingsPod).personal.isEmpty) {
+      if (ref.read(settingsPod).onboardingStage == null) {
         ref.read(settingsPod.notifier).fetchAll();
       }
     });
@@ -48,6 +49,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final state    = ref.watch(dashboardPod);
     final settings = ref.watch(settingsPod);
+
+    if (settings.isLoading && settings.personal.isEmpty) {
+      return const Scaffold(
+        backgroundColor: AppColors.bg,
+        body: Center(child: CircularProgressIndicator(color: AppColors.white)),
+      );
+    }
+
+    if (settings.onboardingStage == 'RESGISTER') {
+      return const LocationSetupScreen();
+    }
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(

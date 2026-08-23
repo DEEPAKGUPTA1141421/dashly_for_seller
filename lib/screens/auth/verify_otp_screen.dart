@@ -7,7 +7,6 @@ import '../../core/widgets/app_button.dart';
 import '../../providers/auth_provider.dart';
 import '../../utils/app_colors.dart';
 import '../../utils/haptic_utils.dart';
-import '../../utils/storage_service.dart';
 
 class VerifyOtpScreen extends ConsumerStatefulWidget {
   const VerifyOtpScreen({super.key});
@@ -80,11 +79,10 @@ class _VerifyOtpScreenState extends ConsumerState<VerifyOtpScreen>
     final success = await ref.read(authPod.notifier).verifyOtp(phone, _otp);
     if (success && mounted) {
       HapticUtils.success();
-      final complete = await StorageService.isOnboardingComplete();
-      if (!mounted) return;
+      final isSignup = ref.read(authPod).isSignup;
       Navigator.pushNamedAndRemoveUntil(
         context,
-        complete ? '/home' : '/onboarding',
+        isSignup ? '/location-setup' : '/home',
         (_) => false,
       );
     } else if (mounted) {
@@ -112,12 +110,17 @@ class _VerifyOtpScreenState extends ConsumerState<VerifyOtpScreen>
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        backgroundColor: AppColors.bg,
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded, color: AppColors.white, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.white, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
-        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppColors.divider),
+        ),
       ),
       body: SafeArea(
         child: Padding(

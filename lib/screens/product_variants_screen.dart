@@ -44,12 +44,17 @@ class _ProductVariantsScreenState extends ConsumerState<ProductVariantsScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        backgroundColor: AppColors.bg,
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
         foregroundColor: AppColors.white,
+        elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Variants', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const Text(
+              'Variants',
+              style: TextStyle(color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3),
+            ),
             Text(
               widget.productName,
               style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w400),
@@ -58,7 +63,10 @@ class _ProductVariantsScreenState extends ConsumerState<ProductVariantsScreen> {
             ),
           ],
         ),
-        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppColors.divider),
+        ),
       ),
       body: state.isLoading
           ? ListView.builder(

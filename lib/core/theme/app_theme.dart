@@ -90,11 +90,17 @@ class AppTheme {
       onError: AppColors.white,
     ),
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.bg,
+      backgroundColor: AppColors.surface,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
       iconTheme: IconThemeData(color: AppColors.white),
-      titleTextStyle: headingMd,
+      titleTextStyle: TextStyle(
+        color: AppColors.white,
+        fontSize: 17,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.3,
+      ),
     ),
     dividerColor: AppColors.border,
     dividerTheme: const DividerThemeData(

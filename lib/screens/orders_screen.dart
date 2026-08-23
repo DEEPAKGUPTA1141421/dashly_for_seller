@@ -20,6 +20,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   // Pairs of (apiValue, displayLabel) — apiValue sent to backend, displayLabel shown in chip
   static const _filters = [
     ('ALL',              'All'),
+    ('INITIATED',        'Initiated'),
     ('CONFIRMED',        'Confirmed'),
     ('PROCESSING',       'Processing'),
     ('OUT_FOR_DELIVERY', 'Out for Delivery'),

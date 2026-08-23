@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api/api_client.dart';
@@ -18,17 +20,19 @@ class SettingsState {
   final Map<String, dynamic> bank;
   final Map<String, dynamic> notifications;
   final Map<String, dynamic> preferences;
+  final bool onboardingComplete;
 
   const SettingsState({
-    this.isLoading      = false,
+    this.isLoading         = false,
     this.savingSection,
     this.error,
     this.successMessage,
-    this.personal       = const {},
-    this.business       = const {},
-    this.bank           = const {},
-    this.notifications  = const {},
-    this.preferences    = const {},
+    this.personal          = const {},
+    this.business          = const {},
+    this.bank              = const {},
+    this.notifications     = const {},
+    this.preferences       = const {},
+    this.onboardingComplete = true, // default true to avoid flashing banner before load
   });
 
   SettingsState copyWith({
@@ -44,17 +48,19 @@ class SettingsState {
     Map<String, dynamic>? bank,
     Map<String, dynamic>? notifications,
     Map<String, dynamic>? preferences,
+    bool? onboardingComplete,
   }) {
     return SettingsState(
-      isLoading:      isLoading     ?? this.isLoading,
-      savingSection:  clearSaving   ? null : (savingSection ?? this.savingSection),
-      error:          clearError    ? null : (error         ?? this.error),
-      successMessage: clearSuccess  ? null : (successMessage ?? this.successMessage),
-      personal:       personal      ?? this.personal,
-      business:       business      ?? this.business,
-      bank:           bank          ?? this.bank,
-      notifications:  notifications ?? this.notifications,
-      preferences:    preferences   ?? this.preferences,
+      isLoading:          isLoading          ?? this.isLoading,
+      savingSection:      clearSaving        ? null : (savingSection ?? this.savingSection),
+      error:              clearError         ? null : (error         ?? this.error),
+      successMessage:     clearSuccess       ? null : (successMessage ?? this.successMessage),
+      personal:           personal           ?? this.personal,
+      business:           business           ?? this.business,
+      bank:               bank               ?? this.bank,
+      notifications:      notifications      ?? this.notifications,
+      preferences:        preferences        ?? this.preferences,
+      onboardingComplete: onboardingComplete ?? this.onboardingComplete,
     );
   }
 }
@@ -76,12 +82,13 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
       final body = res.data as Map<String, dynamic>;
       final data = body['data'] as Map<String, dynamic>? ?? {};
       state = state.copyWith(
-        isLoading:     false,
-        personal:      _asMap(data['personal']),
-        business:      _asMap(data['business']),
-        bank:          _asMap(data['bank']),
-        notifications: _asMap(data['notifications']),
-        preferences:   _asMap(data['preferences']),
+        isLoading:          false,
+        personal:           _asMap(data['personal']),
+        business:           _asMap(data['business']),
+        bank:               _asMap(data['bank']),
+        notifications:      _asMap(data['notifications']),
+        preferences:        _asMap(data['preferences']),
+        onboardingComplete: (data['onboardingComplete'] as bool?) ?? false,
       );
     } on DioException catch (e) {
       state = state.copyWith(isLoading: false, error: AppException.fromDioError(e).message);
@@ -92,31 +99,50 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
 
   // ── Personal Info ─────────────────────────────────────────────────────────
   // PUT /api/v1/seller/settings/personal  (multipart/form-data)
-  // Fields: fullName, displayName, email, phone, profilePhoto (file)
+  // Fields: fullName, displayName, email, phone, profileImage (file), mediaFiles (files)
   Future<bool> updatePersonalInfo({
     required String fullName,
     required String displayName,
     required String email,
     required String phone,
-    String? profilePhotoPath,
+    Uint8List? profilePhotoBytes,
+    String profilePhotoName = 'profile.jpg',
+    List<MapEntry<String, Uint8List>> mediaFiles = const [],
   }) async {
     state = state.copyWith(savingSection: 'personal', clearError: true, clearSuccess: true);
     try {
-      final formMap = <String, dynamic>{
-        'fullName':    fullName,
-        'displayName': displayName,
-        'email':       email,
-        'phone':       phone,
-      };
-      if (profilePhotoPath != null) {
-        formMap['profilePhoto'] = await MultipartFile.fromFile(
-          profilePhotoPath,
-          filename: 'profile.jpg',
+      final stored  = state.personal;
+      final formMap = <String, dynamic>{};
+
+      // Only include fields that actually changed
+      if (fullName    != (stored['fullName']    as String? ?? '')) formMap['fullName']    = fullName;
+      if (displayName != (stored['displayName'] as String? ?? '')) formMap['displayName'] = displayName;
+      if (email       != (stored['email']       as String? ?? '')) formMap['email']       = email;
+      if (phone       != (stored['phone']       as String? ?? '')) formMap['phone']       = phone;
+
+      if (profilePhotoBytes != null) {
+        formMap['profileImage'] = MultipartFile.fromBytes(
+          profilePhotoBytes,
+          filename: profilePhotoName,
         );
+      }
+
+      // Nothing changed — skip the API call entirely
+      if (formMap.isEmpty && mediaFiles.isEmpty) {
+        state = state.copyWith(clearSaving: true, successMessage: 'Nothing to update');
+        return true;
+      }
+
+      final formData = FormData.fromMap(formMap);
+      for (final entry in mediaFiles) {
+        formData.files.add(MapEntry(
+          'mediaFiles',
+          MultipartFile.fromBytes(entry.value, filename: entry.key),
+        ));
       }
       final res  = await _client.put(
         ApiEndpoints.settingsPersonal,
-        data: FormData.fromMap(formMap),
+        data: formData,
         options: Options(contentType: 'multipart/form-data'),
       );
       final body = res.data as Map<String, dynamic>;

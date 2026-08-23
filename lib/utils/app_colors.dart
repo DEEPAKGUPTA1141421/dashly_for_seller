@@ -9,7 +9,7 @@ class AppColors {
 
   // Borders & Dividers
   static const Color border  = Color(0xFF2A2A2A);
-  static const Color divider = Color(0xFF1E1E1E);
+  static const Color divider = Color(0xFF222222);
 
   // Text
   static const Color white    = Colors.white;

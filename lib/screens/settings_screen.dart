@@ -1,7 +1,15 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import '../core/api/api_client.dart';
+import '../core/api/api_endpoints.dart';
+import '../core/widgets/app_shimmer.dart';
 import '../core/widgets/app_toast.dart';
 import '../core/widgets/confirm_modal.dart';
 import '../providers/auth_provider.dart';
@@ -11,7 +19,7 @@ import '../utils/haptic_utils.dart';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-enum _Tab { personal, business, bank, notifications, security }
+enum _Tab { personal, business, bank, notifications }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -56,14 +64,47 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             // Header
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-              child: const Text(
-                'Settings',
-                style: TextStyle(
-                  color: AppColors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.3,
-                ),
+              child: Row(
+                children: [
+                  const Text(
+                    'Settings',
+                    style: TextStyle(
+                      color: AppColors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () async {
+                      HapticUtils.medium();
+                      final confirm = await showConfirmModal(
+                        context,
+                        title: 'Log Out',
+                        message: 'Are you sure you want to log out?',
+                        confirmLabel: 'Log Out',
+                        destructive: true,
+                      );
+                      if (confirm) {
+                        await ref.read(authPod.notifier).logout();
+                        if (context.mounted) {
+                          Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
+                        }
+                      }
+                    },
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.error.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                      ),
+                      child: const Icon(Icons.logout_rounded, color: AppColors.error, size: 20),
+                    ),
+                  ),
+                ],
               ).animate().fadeIn(),
             ),
             const SizedBox(height: 16),
@@ -124,7 +165,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case _Tab.business:      return _BusinessTab(data: state.business);
       case _Tab.bank:          return _BankTab(data: state.bank);
       case _Tab.notifications: return _NotificationsTab(data: state.notifications);
-      case _Tab.security:      return const _SecurityTab();
     }
   }
 
@@ -134,7 +174,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case _Tab.business:      return 'Business';
       case _Tab.bank:          return 'Bank';
       case _Tab.notifications: return 'Notifications';
-      case _Tab.security:      return 'Security';
     }
   }
 
@@ -150,19 +189,20 @@ class _PersonalTab extends ConsumerStatefulWidget {
   ConsumerState<_PersonalTab> createState() => _PersonalTabState();
 }
 
+// (name, bytes, isVideo)
+typedef _LocalMedia = ({String name, Uint8List bytes, bool isVideo});
+
 class _PersonalTabState extends ConsumerState<_PersonalTab> {
   final _fullName    = TextEditingController();
   final _displayName = TextEditingController();
   final _email       = TextEditingController();
   final _phone       = TextEditingController();
-  String? _photoPath;
-  bool _initialized  = false;
 
-  @override
-  void didUpdateWidget(_PersonalTab old) {
-    super.didUpdateWidget(old);
-    if (!_initialized && widget.data.isNotEmpty) _populate();
-  }
+  Uint8List? _profilePhotoBytes;
+  String     _profilePhotoName  = 'profile.jpg';
+  List<String>      _existingMediaUrls = [];
+  List<_LocalMedia> _newMediaItems     = [];
+  bool _initialized = false;
 
   @override
   void initState() {
@@ -170,12 +210,27 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
     if (widget.data.isNotEmpty) _populate();
   }
 
+  @override
+  void didUpdateWidget(_PersonalTab old) {
+    super.didUpdateWidget(old);
+    if (!_initialized && widget.data.isNotEmpty) _populate();
+  }
+
   void _populate() {
-    _initialized = true;
+    _initialized      = true;
     _fullName.text    = widget.data['fullName']    as String? ?? '';
     _displayName.text = widget.data['displayName'] as String? ?? '';
     _email.text       = widget.data['email']       as String? ?? '';
     _phone.text       = widget.data['phone']       as String? ?? '';
+    final raw = widget.data['media_files'];
+    if (raw is List) {
+      _existingMediaUrls = raw.map((e) => e.toString()).toList();
+    } else if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) _existingMediaUrls = decoded.map((e) => e.toString()).toList();
+      } catch (_) {}
+    }
   }
 
   @override
@@ -185,36 +240,66 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
     super.dispose();
   }
 
-  Future<void> _pickPhoto() async {
-    final picker = ImagePicker();
-    final file   = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
-    if (file != null) setState(() => _photoPath = file.path);
+  Future<void> _pickProfilePhoto() async {
+    final xfile = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (xfile == null) return;
+    final bytes = await xfile.readAsBytes();
+    setState(() {
+      _profilePhotoBytes = bytes;
+      _profilePhotoName  = xfile.name;
+    });
+  }
+
+  Future<void> _pickMedia() async {
+    HapticUtils.light();
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'avi'],
+      withData: true,
+    );
+    if (result == null) return;
+    final items = result.files
+        .where((f) => f.bytes != null)
+        .map<_LocalMedia>((f) => (name: f.name, bytes: f.bytes!, isVideo: _isVideo(f.name)))
+        .toList();
+    if (items.isNotEmpty) setState(() => _newMediaItems.addAll(items));
   }
 
   Future<void> _save() async {
     HapticUtils.medium();
     await ref.read(settingsPod.notifier).updatePersonalInfo(
-      fullName:         _fullName.text.trim(),
-      displayName:      _displayName.text.trim(),
-      email:            _email.text.trim(),
-      phone:            _phone.text.trim(),
-      profilePhotoPath: _photoPath,
+      fullName:          _fullName.text.trim(),
+      displayName:       _displayName.text.trim(),
+      email:             _email.text.trim(),
+      phone:             _phone.text.trim(),
+      profilePhotoBytes: _profilePhotoBytes,
+      profilePhotoName:  _profilePhotoName,
+      mediaFiles: _newMediaItems.map((m) => MapEntry(m.name, m.bytes)).toList(),
     );
+    if (mounted) setState(() => _newMediaItems = []);
+  }
+
+  bool _isVideo(String name) {
+    final ext = name.split('.').last.toLowerCase();
+    return ['mp4', 'mov', 'avi', 'mkv'].contains(ext);
   }
 
   @override
   Widget build(BuildContext context) {
-    final saving = ref.watch(settingsPod).savingSection == 'personal';
-    final photoUrl = widget.data['profilePhotoUrl'] as String?;
+    final saving   = ref.watch(settingsPod).savingSection == 'personal';
+    final photoUrl = widget.data['profile_image'] as String?
+                  ?? widget.data['profilePhotoUrl'] as String?;
+    final totalMedia = _existingMediaUrls.length + _newMediaItems.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Profile photo
+        // ── Profile photo ─────────────────────────────────────────────────
         Row(
           children: [
             GestureDetector(
-              onTap: _pickPhoto,
+              onTap: _pickProfilePhoto,
               child: Stack(
                 children: [
                   Container(
@@ -223,16 +308,13 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
                       color: AppColors.surface2,
                       shape: BoxShape.circle,
                       border: Border.all(color: AppColors.border, width: 2),
-                      image: (_photoPath != null || photoUrl != null)
-                          ? null
-                          : null,
                     ),
                     child: ClipOval(
-                      child: _photoPath != null
-                          ? Image.asset(_photoPath!, fit: BoxFit.cover)
+                      child: _profilePhotoBytes != null
+                          ? Image.memory(_profilePhotoBytes!, fit: BoxFit.cover)
                           : photoUrl != null
-                              ? Image.network(photoUrl, fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const Icon(Icons.person_rounded, color: AppColors.grey, size: 32))
+                              ? CachedNetworkImage(imageUrl: photoUrl, fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) => const Icon(Icons.person_rounded, color: AppColors.grey, size: 32))
                               : const Icon(Icons.person_rounded, color: AppColors.grey, size: 32),
                     ),
                   ),
@@ -261,6 +343,93 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
 
         const SizedBox(height: 24),
 
+        // ── Store media ───────────────────────────────────────────────────
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Store Media', style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                  SizedBox(height: 2),
+                  Text('Photos & videos shown on your store', style: TextStyle(color: AppColors.grey, fontSize: 12)),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: _pickMedia,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add_rounded, color: AppColors.white, size: 16),
+                    SizedBox(width: 4),
+                    Text('Add', style: TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        if (totalMedia > 0) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 90,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                ..._existingMediaUrls.asMap().entries.map((e) {
+                  final isVid = _isVideo(e.value);
+                  return _MediaThumb(
+                    isVideo: isVid,
+                    onRemove: () => setState(() => _existingMediaUrls.removeAt(e.key)),
+                    child: isVid
+                        ? const Icon(Icons.videocam_rounded, color: AppColors.grey, size: 28)
+                        : CachedNetworkImage(
+                            imageUrl: e.value, fit: BoxFit.cover,
+                            errorWidget: (_, __, ___) => const Icon(Icons.broken_image_rounded, color: AppColors.grey),
+                          ),
+                  );
+                }),
+                ..._newMediaItems.asMap().entries.map((e) {
+                  final item = e.value;
+                  return _MediaThumb(
+                    isVideo: item.isVideo,
+                    isNew: true,
+                    onRemove: () => setState(() => _newMediaItems.removeAt(e.key)),
+                    child: item.isVideo
+                        ? const Icon(Icons.videocam_rounded, color: AppColors.grey, size: 28)
+                        : Image.memory(item.bytes, fit: BoxFit.cover),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Center(
+              child: Text('No media added yet', style: TextStyle(color: AppColors.greyDark, fontSize: 12)),
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 24),
+
         _Field(label: 'FULL NAME',    ctrl: _fullName,    hint: 'Enter full name'),
         _Field(label: 'DISPLAY NAME', ctrl: _displayName, hint: 'Store / display name'),
         _Field(label: 'EMAIL',        ctrl: _email,       hint: 'you@example.com',   keyboardType: TextInputType.emailAddress),
@@ -269,19 +438,100 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
         const SizedBox(height: 8),
 
         _SaveButton(label: 'Save Personal Info', onTap: _save, isSaving: saving),
-
-        const SizedBox(height: 32),
-        const Divider(color: AppColors.border),
-        const SizedBox(height: 16),
-
-        // Logout
-        _LogoutButton(),
       ],
     );
   }
 }
 
+class _MediaThumb extends StatelessWidget {
+  final Widget child;
+  final bool isVideo;
+  final bool isNew;
+  final VoidCallback onRemove;
+
+  const _MediaThumb({
+    required this.child,
+    required this.onRemove,
+    this.isVideo = false,
+    this.isNew   = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 80, height: 80,
+      margin: const EdgeInsets.only(right: 8),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              width: 80, height: 80,
+              color: AppColors.surface2,
+              child: child,
+            ),
+          ),
+          if (isVideo)
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.play_circle_fill_rounded, color: AppColors.white, size: 28),
+              ),
+            ),
+          if (isNew)
+            Positioned(
+              top: 4, left: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.info.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('NEW', style: TextStyle(color: AppColors.white, fontSize: 8, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          Positioned(
+            top: 4, right: 4,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                width: 20, height: 20,
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.85),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close_rounded, color: AppColors.white, size: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Business Tab ─────────────────────────────────────────────────────────────
+
+const _kBusinessTypes = [
+  ('Sole Proprietorship', Icons.person_rounded),
+  ('Partnership',         Icons.people_rounded),
+  ('Private Limited',     Icons.business_rounded),
+  ('LLP',                 Icons.account_balance_rounded),
+  ('One Person Company',  Icons.person_pin_rounded),
+];
+
+final _superCategoriesPod = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final res  = await ApiClient.instance.client.get(
+    ApiEndpoints.levelZeroCategories,
+    queryParameters: {'level': 'SUPER_CATEGORY'},
+  );
+  final body = res.data as Map<String, dynamic>;
+  final list = body['data'] as List? ?? [];
+  return list.map((e) => e as Map<String, dynamic>).toList();
+});
 
 class _BusinessTab extends ConsumerStatefulWidget {
   final Map<String, dynamic> data;
@@ -291,12 +541,11 @@ class _BusinessTab extends ConsumerStatefulWidget {
 }
 
 class _BusinessTabState extends ConsumerState<_BusinessTab> {
-  final _bizName    = TextEditingController();
-  final _bizType    = TextEditingController();
-  final _gst        = TextEditingController();
-  final _address    = TextEditingController();
-  final _category   = TextEditingController();
-  bool _initialized = false;
+  final _gst = TextEditingController();
+
+  String _bizType    = '';
+  String _categoryId = '';
+  bool   _initialized = false;
 
   @override
   void initState() {
@@ -311,44 +560,160 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
   }
 
   void _populate() {
-    _initialized   = true;
-    _bizName.text  = widget.data['businessName']      as String? ?? '';
-    _bizType.text  = widget.data['businessType']      as String? ?? '';
-    _gst.text      = widget.data['gstNumber']         as String? ?? '';
-    _address.text  = widget.data['registeredAddress'] as String? ?? '';
-    _category.text = widget.data['businessCategory']  as String? ?? '';
+    _initialized = true;
+    _bizType     = widget.data['businessType']      as String? ?? '';
+    _categoryId  = widget.data['businessCategory']  as String? ?? '';
+    _gst.text = widget.data['gstNumber'] as String? ?? '';
   }
 
   @override
   void dispose() {
-    _bizName.dispose(); _bizType.dispose(); _gst.dispose();
-    _address.dispose(); _category.dispose();
+    _gst.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
+    final saved = widget.data;
+    final noChange =
+        _bizType         == (saved['businessType']     as String? ?? '') &&
+        _gst.text.trim() == (saved['gstNumber']        as String? ?? '') &&
+        _categoryId      == (saved['businessCategory'] as String? ?? '');
+
+    if (noChange) {
+      AppToast.show(context, message: 'Nothing to update', type: ToastType.info);
+      return;
+    }
+
     HapticUtils.medium();
     await ref.read(settingsPod.notifier).updateBusiness(
-      businessName:      _bizName.text.trim(),
-      businessType:      _bizType.text.trim(),
+      businessName:      '',
+      businessType:      _bizType,
       gstNumber:         _gst.text.trim(),
-      registeredAddress: _address.text.trim(),
-      businessCategory:  _category.text.trim(),
+      businessCategory:  _categoryId,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final saving = ref.watch(settingsPod).savingSection == 'business';
+    final saving     = ref.watch(settingsPod).savingSection == 'business';
+    final categories = ref.watch(_superCategoriesPod);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _Field(label: 'BUSINESS NAME',      ctrl: _bizName,  hint: 'Your store name'),
-        _Field(label: 'BUSINESS TYPE',      ctrl: _bizType,  hint: 'e.g. Sole Proprietorship'),
-        _Field(label: 'GST NUMBER',         ctrl: _gst,      hint: 'Optional'),
-        _Field(label: 'REGISTERED ADDRESS', ctrl: _address,  hint: 'Full address', maxLines: 3),
-        _Field(label: 'BUSINESS CATEGORY',  ctrl: _category, hint: 'e.g. Fashion, Electronics'),
-        const SizedBox(height: 8),
+
+        // ── Business Type ──────────────────────────────────────────────────
+        const Text('BUSINESS TYPE',
+            style: TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _kBusinessTypes.map((t) {
+            final selected = _bizType == t.$1;
+            return GestureDetector(
+              onTap: () { HapticUtils.light(); setState(() => _bizType = t.$1); },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.white : AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: selected ? AppColors.white : AppColors.border,
+                    width: selected ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(t.$2,
+                        size: 15,
+                        color: selected ? AppColors.bg : AppColors.grey),
+                    const SizedBox(width: 6),
+                    Text(t.$1,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                          color: selected ? AppColors.bg : AppColors.grey,
+                        )),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+
+        const SizedBox(height: 24),
+
+        // ── GST ───────────────────────────────────────────────────────────
+        _Field(label: 'GST NUMBER', ctrl: _gst, hint: 'Optional'),
+
+        // ── Business Category ──────────────────────────────────────────────
+        const Text('BUSINESS CATEGORY',
+            style: TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+        const SizedBox(height: 10),
+
+        categories.when(
+          loading: () => SizedBox(
+            height: 38,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 5,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, __) => const AppShimmer(child: ShimmerBox(width: 90, height: 38)),
+            ),
+          ),
+          error: (_, __) => Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.error.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.error.withOpacity(0.25)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: AppColors.error, size: 16),
+                SizedBox(width: 8),
+                Text('Failed to load categories', style: TextStyle(color: AppColors.error, fontSize: 12)),
+              ],
+            ),
+          ),
+          data: (cats) => Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: cats.map((cat) {
+              final id       = cat['id']   as String? ?? '';
+              final name     = cat['name'] as String? ?? '';
+              final selected = _categoryId == id;
+              return GestureDetector(
+                onTap: () { HapticUtils.light(); setState(() => _categoryId = id); },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: selected ? AppColors.white : AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selected ? AppColors.white : AppColors.border,
+                      width: selected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Text(
+                    name,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? AppColors.bg : AppColors.grey,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+
+        const SizedBox(height: 24),
         _SaveButton(label: 'Save Business Details', onTap: _save, isSaving: saving),
       ].animate(interval: 40.ms).fadeIn().slideY(begin: 0.05, end: 0),
     );
@@ -504,6 +869,13 @@ class _NotificationsTabState extends ConsumerState<_NotificationsTab> {
   }
 
   Future<void> _save() async {
+    final noChange = _prefs.entries.every(
+      (e) => (widget.data[e.key] as bool? ?? false) == e.value,
+    );
+    if (noChange) {
+      AppToast.show(context, message: 'Nothing to update', type: ToastType.info);
+      return;
+    }
     HapticUtils.medium();
     await ref.read(settingsPod.notifier).updateNotifications(
       Map<String, dynamic>.from(_prefs),
@@ -576,15 +948,12 @@ class _Field extends StatelessWidget {
   final String hint;
   final TextInputType keyboardType;
   final bool obscure;
-  final int maxLines;
-
   const _Field({
     required this.label,
     required this.ctrl,
     required this.hint,
     this.keyboardType = TextInputType.text,
     this.obscure      = false,
-    this.maxLines     = 1,
   });
 
   @override
@@ -600,7 +969,7 @@ class _Field extends StatelessWidget {
             controller:   ctrl,
             keyboardType: keyboardType,
             obscureText:  obscure,
-            maxLines:     obscure ? 1 : maxLines,
+            maxLines:     obscure ? 1 : 1,
             style: const TextStyle(color: AppColors.white, fontSize: 14),
             decoration: InputDecoration(
               hintText:          hint,
@@ -650,121 +1019,3 @@ class _SaveButton extends StatelessWidget {
   }
 }
 
-// ─── Security Tab ─────────────────────────────────────────────────────────────
-
-class _SecurityTab extends ConsumerStatefulWidget {
-  const _SecurityTab();
-
-  @override
-  ConsumerState<_SecurityTab> createState() => _SecurityTabState();
-}
-
-class _SecurityTabState extends ConsumerState<_SecurityTab> {
-  final _current  = TextEditingController();
-  final _newPass  = TextEditingController();
-  final _confirm  = TextEditingController();
-
-  @override
-  void dispose() {
-    _current.dispose();
-    _newPass.dispose();
-    _confirm.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (_newPass.text != _confirm.text) {
-      AppToast.show(context, message: 'Passwords do not match', type: ToastType.error);
-      return;
-    }
-    if (_newPass.text.length < 6) {
-      AppToast.show(context, message: 'Password must be at least 6 characters', type: ToastType.error);
-      return;
-    }
-    HapticUtils.medium();
-    final ok = await ref.read(settingsPod.notifier).changePassword(
-      currentPassword: _current.text.trim(),
-      newPassword:     _newPass.text.trim(),
-    );
-    if (ok && mounted) {
-      _current.clear();
-      _newPass.clear();
-      _confirm.clear();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final saving = ref.watch(settingsPod).savingSection == 'security';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.info.withOpacity(0.07),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.info.withOpacity(0.2)),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.lock_outline_rounded, color: AppColors.info, size: 16),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Use a strong password with letters, numbers, and symbols.',
-                  style: TextStyle(color: AppColors.grey, fontSize: 12, height: 1.4),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        _Field(label: 'CURRENT PASSWORD', ctrl: _current, hint: 'Enter current password', obscure: true),
-        _Field(label: 'NEW PASSWORD',     ctrl: _newPass,  hint: 'Min. 6 characters',     obscure: true),
-        _Field(label: 'CONFIRM PASSWORD', ctrl: _confirm,  hint: 'Re-enter new password',  obscure: true),
-        const SizedBox(height: 8),
-        _SaveButton(label: 'Update Password', onTap: _save, isSaving: saving),
-      ].animate(interval: 40.ms).fadeIn().slideY(begin: 0.05, end: 0),
-    );
-  }
-}
-
-class _LogoutButton extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return GestureDetector(
-      onTap: () async {
-        HapticUtils.medium();
-        final confirm = await showConfirmModal(
-          context,
-          title: 'Log Out',
-          message: 'Are you sure you want to log out?',
-          confirmLabel: 'Log Out',
-          destructive: true,
-        );
-        if (confirm) {
-          await ref.read(authPod.notifier).logout();
-          if (context.mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
-        }
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.error.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.error.withOpacity(0.3)),
-        ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.logout_rounded, color: AppColors.error, size: 18),
-            SizedBox(width: 10),
-            Text('Log Out', style: TextStyle(color: AppColors.error, fontSize: 14, fontWeight: FontWeight.w600)),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -27,8 +27,8 @@ class StatCard extends StatelessWidget {
         ..rotateY(0.015),
       alignment: Alignment.center,
       child: Container(
-        width: 160,
-        padding: const EdgeInsets.all(16),
+        width: 155,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(18),
@@ -43,28 +43,36 @@ class StatCard extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w500),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w500),
+                  ),
                 ),
+                const SizedBox(width: 6),
                 Container(
-                  width: 32,
-                  height: 32,
+                  width: 30,
+                  height: 30,
                   decoration: BoxDecoration(
                     color: color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(9),
                   ),
-                  child: Icon(icon, color: color, size: 16),
+                  child: Icon(icon, color: color, size: 15),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             Text(
               value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: AppColors.white,
                 fontSize: 20,
@@ -78,11 +86,12 @@ class StatCard extends StatelessWidget {
                 Icon(
                   isPositive ? Icons.trending_up_rounded : Icons.trending_down_rounded,
                   color: isPositive ? AppColors.success : AppColors.error,
-                  size: 14,
+                  size: 13,
                 ),
                 const SizedBox(width: 4),
                 Text(
                   '${isPositive ? '+' : ''}${change.toStringAsFixed(1)}%',
+                  maxLines: 1,
                   style: TextStyle(
                     color: isPositive ? AppColors.success : AppColors.error,
                     fontSize: 11,

@@ -50,33 +50,37 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         child: Column(
           children: [
             // Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-              child: Row(
+            Container(
+              color: AppColors.surface,
+              padding: EdgeInsets.fromLTRB(4, MediaQuery.of(context).padding.top > 0 ? 8 : 16, 8, 0),
+              child: Column(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppColors.white, size: 20),
-                    onPressed: () => Navigator.of(context).pop(),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'Notifications',
-                      style: TextStyle(color: AppColors.white, fontSize: 20, fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  if (state.unreadCount > 0)
-                    TextButton(
-                      onPressed: () {
-                        HapticUtils.light();
-                        ref.read(notificationsPod.notifier).markAllRead();
-                      },
-                      child: const Text('Mark all read', style: TextStyle(color: AppColors.grey, fontSize: 12)),
-                    ),
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.white, size: 20),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                      const Expanded(
+                        child: Text(
+                          'Notifications',
+                          style: TextStyle(color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3),
+                        ),
+                      ),
+                      if (state.unreadCount > 0)
+                        TextButton(
+                          onPressed: () {
+                            HapticUtils.light();
+                            ref.read(notificationsPod.notifier).markAllRead();
+                          },
+                          child: const Text('Mark all read', style: TextStyle(color: AppColors.grey, fontSize: 12)),
+                        ),
+                    ],
+                  ).animate().fadeIn(),
+                  const SizedBox(height: 8),
+                  Container(height: 1, color: AppColors.divider),
                 ],
-              ).animate().fadeIn(),
+              ),
             ),
 
             const SizedBox(height: 12),

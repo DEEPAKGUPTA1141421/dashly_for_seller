@@ -1,8 +1,8 @@
 class ApiEndpoints {
   // ── Service bases ──────────────────────────────────────────────────────────
   static const String productServiceBase  = 'http://localhost:8081';
-  static const String orderServiceBase    = 'http://localhost:8082';
-  static const String deliveryServiceBase = 'http://localhost:8083';
+  static const String orderServiceBase    = 'https://orderpaymentnotificationservice.onrender.com ';
+  static const String deliveryServiceBase = 'https://deliveryinventoryservice.onrender.com';
 
   // ── Auth  (ProductClientService · 8081) ───────────────────────────────────
   static const String login     = '/api/v1/auth/login';
@@ -12,6 +12,7 @@ class ApiEndpoints {
 
   // ── Seller Products  (ProductClientService · 8081) ────────────────────────
   static const String sellerProducts               = '/api/v1/seller/product/my-products';
+  static const String sellerProductsEs             = '/api/v1/seller/product/my-products-es';
   static const String sellerProductBase            = '/api/v1/seller/product'; // DELETE /{productId}  PATCH /{productId}/toggle-active
   static const String sellerProductCreate          = '/api/v1/seller/product/create';
   static const String sellerProductUploadImages    = '/api/v1/seller/product/upload-images';
@@ -26,6 +27,8 @@ class ApiEndpoints {
   static const String sellerProductDraftFull       = '/api/v1/seller/product/draft-product/full';
   static const String sellerProductDiscardDraft    = '/api/v1/seller/product/discard-draft-product';
   static const String sellerProductCatalogSearch   = '/api/v1/seller/product/catalog/search';
+  // GET /api/v1/seller/product/catalog/detail/{standardProductId}
+  static const String sellerProductCatalogDetail   = '/api/v1/seller/product/catalog/detail';
   static const String sellerProductFromCatalog     = '/api/v1/seller/product/listing/from-catalog';
   static const String sellerProductUpdateAddress   = '/api/v1/seller/product/update-address';
 
@@ -64,7 +67,9 @@ class ApiEndpoints {
   static const String sellerOrders             = '/api/v1/seller/orders';
   static const String sellerOrderStatusCounts  = '/api/v1/seller/orders/status-counts';
   static const String sellerStats              = '/api/v1/seller/stats';
-  static const String sellerProductLowStock = '/api/v1/seller/product/low-stock';
+  static const String sellerProductLowStock    = '/api/v1/seller/product/low-stock';
+  static const String sellerReviews            = '/api/v1/seller/product/reviews';
+  static const String sellerReviewSummary      = '/api/v1/seller/product/reviews/summary';
   static const String sellerTopProducts = '/api/v1/seller/stats/top-products';
   static const String sellerEarnings    = '/api/v1/seller/earnings';
 

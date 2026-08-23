@@ -176,8 +176,10 @@ class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
                           final name     = (m['productName'] as String?)?.isNotEmpty == true
                               ? m['productName'] as String
                               : 'Product $shortPid';
+                          final imageUrl = m['productImageUrl'] as String?;
                           return _ItemRow(
                             label: name,
+                            imageUrl: imageUrl,
                             qty: qty,
                             unitPrice: price,
                             lineTotal: total,
@@ -288,18 +290,43 @@ class _Row extends StatelessWidget {
 }
 
 class _ItemRow extends StatelessWidget {
-  final String label;
-  final int    qty;
-  final String unitPrice;
-  final String lineTotal;
-  const _ItemRow({required this.label, required this.qty, required this.unitPrice, required this.lineTotal});
+  final String  label;
+  final String? imageUrl;
+  final int     qty;
+  final String  unitPrice;
+  final String  lineTotal;
+  const _ItemRow({
+    required this.label,
+    this.imageUrl,
+    required this.qty,
+    required this.unitPrice,
+    required this.lineTotal,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: imageUrl != null && imageUrl!.isNotEmpty
+                ? Image.network(
+                    imageUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        const Icon(Icons.inventory_2_rounded, color: AppColors.grey, size: 18),
+                  )
+                : const Icon(Icons.inventory_2_rounded, color: AppColors.grey, size: 18),
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

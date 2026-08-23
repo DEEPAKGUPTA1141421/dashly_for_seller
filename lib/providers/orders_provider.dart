@@ -9,10 +9,11 @@ class OrdersState {
   final String? error;
   final List<dynamic> orders;
   final Map<String, dynamic> orderDetail;
-  final String filterStatus; // 'ALL' | 'CONFIRMED' | 'PROCESSING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED'
+  final String filterStatus; // 'ALL' | 'INITIATED' | 'CONFIRMED' | 'PROCESSING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED'
   final int currentPage;
   final bool hasMore;
   final Map<String, int> statusCounts; // {'ALL': 50, 'CONFIRMED': 3, ...}
+  final Map<String, List<dynamic>> cachedOrders; // per-status cache
 
   const OrdersState({
     this.isLoading    = false,
@@ -23,6 +24,7 @@ class OrdersState {
     this.currentPage  = 0,
     this.hasMore      = true,
     this.statusCounts = const {},
+    this.cachedOrders = const {},
   });
 
   OrdersState copyWith({
@@ -34,6 +36,7 @@ class OrdersState {
     int? currentPage,
     bool? hasMore,
     Map<String, int>? statusCounts,
+    Map<String, List<dynamic>>? cachedOrders,
   }) {
     return OrdersState(
       isLoading:    isLoading    ?? this.isLoading,
@@ -44,6 +47,7 @@ class OrdersState {
       currentPage:  currentPage  ?? this.currentPage,
       hasMore:      hasMore      ?? this.hasMore,
       statusCounts: statusCounts ?? this.statusCounts,
+      cachedOrders: cachedOrders ?? this.cachedOrders,
     );
   }
 }
@@ -56,18 +60,20 @@ class OrdersNotifier extends StateNotifier<OrdersState> {
 
   // GET /api/v1/seller/orders?page=0&size=20&status=ALL
   Future<void> fetchOrders({String? status, bool reset = true}) async {
+    final s = status ?? 'ALL';
     if (reset) state = state.copyWith(isLoading: true, error: null, currentPage: 0);
     try {
-      final params = <String, dynamic>{'page': 0, 'size': 20, 'status': status ?? 'ALL'};
+      final params = <String, dynamic>{'page': 0, 'size': 20, 'status': s};
 
       final res  = await _client.get(ApiEndpoints.sellerOrders, queryParameters: params);
       final body = res.data as Map<String, dynamic>;
       final data = (body['data'] as Map<String, dynamic>?)?['orders'] as List<dynamic>? ?? [];
 
       state = state.copyWith(
-        isLoading: false,
-        orders:    data,
-        hasMore:   data.length >= 20,
+        isLoading:    false,
+        orders:       data,
+        hasMore:      data.length >= 20,
+        cachedOrders: {...state.cachedOrders, s: data},
       );
     } on DioException catch (e) {
       state = state.copyWith(isLoading: false, error: AppException.fromDioError(e).message);
@@ -99,10 +105,12 @@ class OrdersNotifier extends StateNotifier<OrdersState> {
       final res  = await _client.get(ApiEndpoints.sellerOrders, queryParameters: params);
       final body = res.data as Map<String, dynamic>;
       final data = (body['data'] as Map<String, dynamic>?)?['orders'] as List<dynamic>? ?? [];
+      final merged = [...state.orders, ...data];
       state = state.copyWith(
-        orders:      [...state.orders, ...data],
-        currentPage: nextPage,
-        hasMore:     data.length >= 20,
+        orders:       merged,
+        currentPage:  nextPage,
+        hasMore:      data.length >= 20,
+        cachedOrders: {...state.cachedOrders, state.filterStatus: merged},
       );
     } on DioException catch (e) {
       state = state.copyWith(error: AppException.fromDioError(e).message);
@@ -110,6 +118,13 @@ class OrdersNotifier extends StateNotifier<OrdersState> {
   }
 
   void setFilter(String status) {
+    if (state.filterStatus == status) return; // already on this tab
+    final cached = state.cachedOrders[status];
+    if (cached != null) {
+      // Serve from cache — no API call
+      state = state.copyWith(filterStatus: status, orders: cached, hasMore: false);
+      return;
+    }
     state = state.copyWith(filterStatus: status);
     fetchOrders(status: status);
   }
@@ -141,7 +156,8 @@ class OrdersNotifier extends StateNotifier<OrdersState> {
           }
           return order;
         }).toList();
-        state = state.copyWith(orders: updatedOrders);
+        // Invalidate full cache so stale statuses reload on next visit
+        state = state.copyWith(orders: updatedOrders, cachedOrders: {});
         return true;
       }
       return false;

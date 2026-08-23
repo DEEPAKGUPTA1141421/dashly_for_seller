@@ -3,9 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/api/auth_interceptor.dart';
 import 'main_layout.dart';
+import 'screens/auth/location_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/verify_otp_screen.dart';
-import 'screens/onboarding/onboarding_screen.dart';
 import 'core/theme/app_theme.dart';
 import 'utils/app_colors.dart';
 import 'utils/storage_service.dart';
@@ -36,10 +36,10 @@ class DashlySellerApp extends StatelessWidget {
       theme: AppTheme.dark,
       home: const _SplashScreen(),
       routes: {
-        '/login':      (_) => const LoginScreen(),
-        '/verify':     (_) => const VerifyOtpScreen(),
-        '/onboarding': (_) => const OnboardingScreen(),
-        '/home':       (_) => const MainLayout(),
+        '/login':          (_) => const LoginScreen(),
+        '/verify':         (_) => const VerifyOtpScreen(),
+        '/location-setup': (_) => const LocationSetupScreen(),
+        '/home':           (_) => const MainLayout(),
       },
     );
   }

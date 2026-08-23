@@ -12,9 +12,11 @@ import 'add_product/steps/variants_step.dart';
 import 'add_product/steps/images_step.dart';
 import 'add_product/steps/tags_brand_step.dart';
 import 'add_product/steps/review_step.dart';
+import 'add_product/catalog_search_screen.dart';
 
 class AddProductScreen extends ConsumerStatefulWidget {
-  const AddProductScreen({super.key});
+  final bool skipChoice;
+  const AddProductScreen({super.key, this.skipChoice = false});
 
   @override
   ConsumerState<AddProductScreen> createState() => _AddProductScreenState();
@@ -36,6 +38,9 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
     CupertinoIcons.rocket,
   ];
 
+  // Whether the add-mode choice sheet has been shown this session
+  var _choiceShownOnce = false;
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +48,76 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
       await ref.read(addProductPod.notifier).init();
       await ref.read(addProductPod.notifier).checkForDraft();
     });
+  }
+
+  void _showAddChoiceSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            24, 24, 24, 24 + MediaQuery.of(ctx).padding.bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Add a Product',
+              style: TextStyle(
+                color: AppColors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'How would you like to add this product?',
+              style: TextStyle(color: AppColors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Find in catalog ─────────────────────────────────────────
+            AddProductChoiceTile(
+              icon: CupertinoIcons.search,
+              title: 'Find Existing Product',
+              subtitle:
+                  'Search our catalog — Samsung, Maggi, Dove and more. '
+                  'Just set your price and stock.',
+              badge: 'Faster',
+              badgeColor: AppColors.success,
+              onTap: () {
+                HapticUtils.light();
+                Navigator.pop(ctx); // close sheet
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const CatalogSearchScreen()),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+
+            // ── Create custom ───────────────────────────────────────────
+            AddProductChoiceTile(
+              icon: CupertinoIcons.pencil_outline,
+              title: 'Create Custom Product',
+              subtitle:
+                  'Build a product from scratch — name, photos, attributes '
+                  'and variants.',
+              onTap: () {
+                HapticUtils.light();
+                Navigator.pop(ctx); // dismiss and continue with the wizard
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showDraftDialog(BuildContext context) {
@@ -82,7 +157,15 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
   @override
   Widget build(BuildContext context) {
     ref.listen<AddProductState>(addProductPod, (_, next) {
-      if (next.hasDraft && mounted) _showDraftDialog(context);
+      if (!mounted) return;
+      if (next.hasDraft) {
+        _showDraftDialog(context);
+      } else if (next.draftChecked && !_choiceShownOnce && !widget.skipChoice) {
+        _choiceShownOnce = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showAddChoiceSheet();
+        });
+      }
     });
     final state = ref.watch(addProductPod);
     final step  = state.currentStep;
@@ -105,12 +188,14 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
       child: Scaffold(
         backgroundColor: AppColors.bg,
         appBar: AppBar(
-          backgroundColor: AppColors.bg,
+          backgroundColor: AppColors.surface,
+          surfaceTintColor: Colors.transparent,
           elevation: 0,
           leading: IconButton(
             icon: Icon(
-              step > 0 ? Icons.arrow_back_rounded : Icons.close_rounded,
+              step > 0 ? Icons.arrow_back_ios_new : Icons.close_rounded,
               color: AppColors.white,
+              size: 20,
             ),
             onPressed: () {
               HapticUtils.light();
@@ -126,7 +211,7 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
               Text(
                 _stepLabels[step],
                 style: const TextStyle(
-                  color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700,
+                  color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3,
                 ),
               ),
               Text(
@@ -136,6 +221,10 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
             ],
           ),
           centerTitle: true,
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Container(height: 1, color: AppColors.divider),
+          ),
         ),
 
         body: Column(
@@ -168,6 +257,108 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
                 child: KeyedSubtree(key: ValueKey(step), child: steps[step]),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Add-mode choice tile ──────────────────────────────────────────────────────
+
+class AddProductChoiceTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final Color? badgeColor;
+  final VoidCallback onTap;
+
+  const AddProductChoiceTile({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.badge,
+    this.badgeColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface2,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Icon(icon, color: AppColors.white, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (badge != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (badgeColor ?? AppColors.info)
+                                .withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            badge!,
+                            style: TextStyle(
+                              color: badgeColor ?? AppColors.info,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppColors.grey,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(CupertinoIcons.chevron_right,
+                color: AppColors.greyDark, size: 16),
           ],
         ),
       ),

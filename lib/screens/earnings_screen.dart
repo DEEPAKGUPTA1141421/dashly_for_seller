@@ -37,10 +37,18 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        backgroundColor: AppColors.bg,
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
         foregroundColor: AppColors.white,
-        title: const Text('Earnings', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
         elevation: 0,
+        title: const Text(
+          'Earnings',
+          style: TextStyle(color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: AppColors.divider),
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,

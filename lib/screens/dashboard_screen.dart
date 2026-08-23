@@ -6,14 +6,18 @@ import '../core/widgets/app_shimmer.dart';
 import '../main_layout.dart';
 import '../providers/dashboard_provider.dart';
 import '../providers/notifications_provider.dart';
-import '../providers/onboarding_provider.dart';
+import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
+import '../utils/storage_service.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/mini_sales_chart.dart';
 import '../widgets/order_list_tile.dart';
 import 'earnings_screen.dart';
 import 'notifications_screen.dart';
+
+final _displayNamePod = FutureProvider<String>((ref) async =>
+    await StorageService.getDisplayName() ?? '');
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -27,9 +31,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   void initState() {
     super.initState();
     Future.microtask(() async {
-      await ref.read(onboardingPod.notifier).checkOnboardingStatus();
       ref.read(dashboardPod.notifier).fetchDashboard();
       ref.read(notificationsPod.notifier).fetchNotifications();
+      if (ref.read(settingsPod).personal.isEmpty) {
+        ref.read(settingsPod.notifier).fetchAll();
+      }
     });
   }
 
@@ -40,8 +46,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(dashboardPod);
-    final onboarding = ref.watch(onboardingPod);
+    final state    = ref.watch(dashboardPod);
+    final settings = ref.watch(settingsPod);
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
@@ -62,7 +68,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Good ${_greeting()},',
+                            'Good ${_greeting()}, ${ref.watch(_displayNamePod).valueOrNull ?? ''}',
                             style: const TextStyle(color: AppColors.grey, fontSize: 13),
                           ),
                           const Text(
@@ -88,18 +94,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 ),
               ),
 
-              // Profile incomplete banner
-              if (!onboarding.isComplete)
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+
+              // Onboarding incomplete banner
+              if (!settings.onboardingComplete)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                    child: _ProfileIncompleteBanner(
-                      onTap: () => Navigator.pushNamed(context, '/onboarding'),
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    child: _OnboardingBanner(
+                      onTap: () {
+                        HapticUtils.light();
+                        ref.read(navIndexPod.notifier).state = 4;
+                      },
                     ),
                   ).animate().fadeIn(),
                 ),
-
-              const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
               // Needs-attention banner (CONFIRMED orders awaiting acceptance)
               if (!state.isLoading && (state.stats['pendingOrders'] as num? ?? 0) > 0)
@@ -117,54 +126,59 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
               // Stat cards
               SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 120,
-                  child: state.isLoading
-                      ? ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          itemCount: 4,
-                          separatorBuilder: (_, __) => const SizedBox(width: 12),
-                          itemBuilder: (_, __) => const SizedBox(width: 160, child: StatCardShimmer()),
-                        )
-                      : ListView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          children: [
-                            StatCard(
-                              title: 'Total Revenue',
-                              value: _formatCurrency(state.stats['totalRevenue']),
-                              change: (state.stats['revenueChange'] as num?)?.toDouble() ?? 0,
-                              icon: Icons.currency_rupee_rounded,
-                              color: AppColors.white,
-                            ),
-                            const SizedBox(width: 12),
-                            StatCard(
-                              title: 'Total Orders',
-                              value: '${state.stats['totalOrders'] ?? 0}',
-                              change: (state.stats['ordersChange'] as num?)?.toDouble() ?? 0,
-                              icon: Icons.shopping_bag_rounded,
-                              color: AppColors.info,
-                            ),
-                            const SizedBox(width: 12),
-                            StatCard(
-                              title: 'Products',
-                              value: '${state.stats['totalProducts'] ?? 0}',
-                              change: (state.stats['productsChange'] as num?)?.toDouble() ?? 0,
-                              icon: Icons.inventory_2_rounded,
-                              color: AppColors.success,
-                            ),
-                            const SizedBox(width: 12),
-                            StatCard(
-                              title: 'Pending',
-                              value: '${state.stats['pendingOrders'] ?? 0}',
-                              change: (state.stats['pendingChange'] as num?)?.toDouble() ?? 0,
-                              icon: Icons.local_shipping_rounded,
-                              color: AppColors.warning,
-                            ),
-                          ],
+                child: state.isLoading
+                    ? SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Row(
+                          children: List.generate(4, (i) => Padding(
+                            padding: EdgeInsets.only(right: i < 3 ? 12 : 0),
+                            child: const SizedBox(width: 155, child: StatCardShimmer()),
+                          )),
                         ),
-                ),
+                      )
+                    : SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              StatCard(
+                                title: 'Total Revenue',
+                                value: _formatCurrency(state.stats['totalRevenue']),
+                                change: (state.stats['revenueChange'] as num?)?.toDouble() ?? 0,
+                                icon: Icons.currency_rupee_rounded,
+                                color: AppColors.white,
+                              ),
+                              const SizedBox(width: 12),
+                              StatCard(
+                                title: 'Total Orders',
+                                value: '${state.stats['totalOrders'] ?? 0}',
+                                change: (state.stats['ordersChange'] as num?)?.toDouble() ?? 0,
+                                icon: Icons.shopping_bag_rounded,
+                                color: AppColors.info,
+                              ),
+                              const SizedBox(width: 12),
+                              StatCard(
+                                title: 'Products',
+                                value: '${state.stats['totalProducts'] ?? 0}',
+                                change: (state.stats['productsChange'] as num?)?.toDouble() ?? 0,
+                                icon: Icons.inventory_2_rounded,
+                                color: AppColors.success,
+                              ),
+                              const SizedBox(width: 12),
+                              StatCard(
+                                title: 'Pending',
+                                value: '${state.stats['pendingOrders'] ?? 0}',
+                                change: (state.stats['pendingChange'] as num?)?.toDouble() ?? 0,
+                                icon: Icons.local_shipping_rounded,
+                                color: AppColors.warning,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
               ),
 
               const SliverToBoxAdapter(child: SizedBox(height: 28)),
@@ -438,54 +452,52 @@ class _BellButton extends ConsumerWidget {
   }
 }
 
-class _ProfileIncompleteBanner extends StatelessWidget {
+
+class _OnboardingBanner extends StatelessWidget {
   final VoidCallback onTap;
-  const _ProfileIncompleteBanner({required this.onTap});
+  const _OnboardingBanner({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.warning.withOpacity(0.35)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.warning.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.warning.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.warning.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.person_outline_rounded, color: AppColors.warning, size: 20),
             ),
-            child: const Icon(Icons.person_outline_rounded, color: AppColors.warning, size: 20),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Profile Incomplete',
-                  style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w700),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Complete your profile to start selling',
-                  style: TextStyle(color: AppColors.grey, fontSize: 12),
-                ),
-              ],
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Complete Your Profile',
+                    style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Finish onboarding to start selling on Dashly',
+                    style: TextStyle(color: AppColors.grey, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () {
-              HapticUtils.light();
-              onTap();
-            },
-            child: Container(
+            const SizedBox(width: 8),
+            Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: AppColors.warning,
@@ -496,8 +508,8 @@ class _ProfileIncompleteBanner extends StatelessWidget {
                 style: TextStyle(color: Colors.black, fontSize: 12, fontWeight: FontWeight.w700),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

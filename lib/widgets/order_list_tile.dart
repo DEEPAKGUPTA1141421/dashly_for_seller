@@ -12,13 +12,15 @@ class OrderListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status    = order['status'] as String? ?? 'INITIATED';
-    final bookingId = (order['bookingId'] ?? '').toString();
-    final shortId   = bookingId.length > 8 ? '#${bookingId.substring(0, 8).toUpperCase()}' : '#$bookingId';
-    final amountStr = order['totalAmountRupees'] as String? ?? '0.00';
-    final itemCount = (order['itemCount'] as num?)?.toInt() ?? 0;
-    final payMode   = order['paymentMode'] as String? ?? '';
-    final createdAt = order['createdAt'] as String? ?? '';
+    final status       = order['status'] as String? ?? 'INITIATED';
+    final bookingId    = (order['bookingId'] ?? '').toString();
+    final shortId      = bookingId.length > 8 ? '#${bookingId.substring(0, 8).toUpperCase()}' : '#$bookingId';
+    final amountStr    = order['totalAmountRupees'] as String? ?? '0.00';
+    final itemCount    = (order['itemCount'] as num?)?.toInt() ?? 0;
+    final payMode      = order['paymentMode'] as String? ?? '';
+    final createdAt    = order['createdAt'] as String? ?? '';
+    final imageUrl     = order['firstItemImageUrl'] as String?;
+    final firstName    = order['firstItemName'] as String?;
 
     return GestureDetector(
       onTap: () {
@@ -35,15 +37,7 @@ class OrderListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.surface2,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.shopping_bag_rounded, color: AppColors.grey, size: 20),
-            ),
+            _ProductThumb(imageUrl: imageUrl),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -53,10 +47,18 @@ class OrderListTile extends StatelessWidget {
                     shortId,
                     style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w600),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
+                  if (firstName != null && firstName.isNotEmpty)
+                    Text(
+                      firstName,
+                      style: const TextStyle(color: AppColors.white, fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  const SizedBox(height: 2),
                   Text(
                     '$itemCount item${itemCount != 1 ? 's' : ''}${payMode.isNotEmpty ? ' · $payMode' : ''}',
-                    style: const TextStyle(color: AppColors.grey, fontSize: 12),
+                    style: const TextStyle(color: AppColors.grey, fontSize: 11),
                   ),
                 ],
               ),
@@ -85,7 +87,7 @@ class OrderListTile extends StatelessWidget {
     );
   }
 
-  String _relativeTime(String iso) {
+  static String _relativeTime(String iso) {
     try {
       final dt   = DateTime.parse(iso).toLocal();
       final diff = DateTime.now().difference(dt);
@@ -97,5 +99,31 @@ class OrderListTile extends StatelessWidget {
     } catch (_) {
       return '';
     }
+  }
+}
+
+class _ProductThumb extends StatelessWidget {
+  final String? imageUrl;
+  const _ProductThumb({this.imageUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: imageUrl != null && imageUrl!.isNotEmpty
+          ? Image.network(
+              imageUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) =>
+                  const Icon(Icons.shopping_bag_rounded, color: AppColors.grey, size: 22),
+            )
+          : const Icon(Icons.shopping_bag_rounded, color: AppColors.grey, size: 22),
+    );
   }
 }

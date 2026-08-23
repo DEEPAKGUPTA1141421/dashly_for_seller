@@ -4,8 +4,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/widgets/app_shimmer.dart';
 import '../providers/analytics_provider.dart';
+import '../providers/reviews_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
+import 'reviews_screen.dart';
 
 class AnalyticsScreen extends ConsumerStatefulWidget {
   const AnalyticsScreen({super.key});
@@ -18,12 +20,16 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(analyticsPod.notifier).fetchStats());
+    Future.microtask(() async {
+      await ref.read(analyticsPod.notifier).fetchStats();
+      ref.read(reviewsPod.notifier).fetchSummary();
+    });
   }
 
   Future<void> _refresh() async {
     HapticUtils.light();
     await ref.read(analyticsPod.notifier).fetchStats();
+    ref.read(reviewsPod.notifier).fetchSummary();
   }
 
   @override
@@ -106,28 +112,24 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
               // Summary cards
               SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 100,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: state.isLoading
-                      ? ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          itemCount: 3,
-                          separatorBuilder: (_, __) => const SizedBox(width: 12),
-                          itemBuilder: (_, __) => const SizedBox(
-                            width: 130,
-                            child: AppShimmer(child: ShimmerBox(height: 100)),
-                          ),
-                        )
-                      : ListView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                      ? Row(children: [
+                          Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
+                          const SizedBox(width: 12),
+                          Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
+                          const SizedBox(width: 12),
+                          Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
+                        ])
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _SummaryCard(label: 'Total Revenue', value: totalRevStr, change: revenueChange),
-                            const SizedBox(width: 12),
-                            _SummaryCard(label: 'Total Orders',  value: totalOrdersStr, change: ordersChange),
-                            const SizedBox(width: 12),
-                            _SummaryCard(label: 'Pending',       value: pendingStr),
+                            Expanded(child: _SummaryCard(label: 'Total Revenue', value: totalRevStr, change: revenueChange)),
+                            const SizedBox(width: 10),
+                            Expanded(child: _SummaryCard(label: 'Total Orders',  value: totalOrdersStr, change: ordersChange)),
+                            const SizedBox(width: 10),
+                            Expanded(child: _SummaryCard(label: 'Pending',       value: pendingStr)),
                           ],
                         ),
                 ).animate().fadeIn(delay: 80.ms),
@@ -217,6 +219,54 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                     ).animate().fadeIn(delay: 180.ms),
                   ),
                 ),
+
+              // Customer reviews summary
+              SliverToBoxAdapter(
+                child: Builder(builder: (context) {
+                  final reviewState = ref.watch(reviewsPod);
+                  final summary     = reviewState.summary;
+                  if (summary.isEmpty) return const SizedBox.shrink();
+                  final avg   = (summary['avgRating'] as num?)?.toDouble() ?? 0.0;
+                  final count = (summary['totalCount'] as num?)?.toInt() ?? 0;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+                    child: GestureDetector(
+                      onTap: () {
+                        HapticUtils.light();
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const ReviewsScreen()));
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.star_rounded, color: AppColors.warning, size: 28),
+                            const SizedBox(width: 14),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Customer Reviews',
+                                    style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$count review${count != 1 ? 's' : ''} · avg ${avg.toStringAsFixed(1)} ★',
+                                  style: const TextStyle(color: AppColors.grey, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                            const Spacer(),
+                            const Icon(Icons.chevron_right_rounded, color: AppColors.greyDark, size: 20),
+                          ],
+                        ),
+                      ).animate().fadeIn(delay: 200.ms),
+                    ),
+                  );
+                }),
+              ),
 
               const SliverToBoxAdapter(child: SizedBox(height: 32)),
             ],
@@ -551,11 +601,10 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final showChange = change != null && change != 0;
     final isUp       = (change ?? 0) >= 0;
-    final changeStr  = '${isUp ? '+' : ''}${change!.toStringAsFixed(1)}%';
+    final changeStr  = showChange ? '${isUp ? '+' : ''}${change!.toStringAsFixed(1)}%' : '';
 
     return Container(
-      width: 148,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
@@ -563,14 +612,26 @@ class _SummaryCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.grey, fontSize: 11)),
-          const SizedBox(height: 6),
-          Text(value, style: const TextStyle(color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w800)),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: AppColors.grey, fontSize: 11),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w800),
+          ),
           if (showChange) ...[
             const SizedBox(height: 4),
             Text(
               changeStr,
+              maxLines: 1,
               style: TextStyle(
                 color: isUp ? AppColors.success : AppColors.error,
                 fontSize: 11,

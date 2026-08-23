@@ -48,8 +48,9 @@ class AppTextField extends StatelessWidget {
             label!,
             style: const TextStyle(
               color: AppColors.grey,
-              fontSize: 13,
+              fontSize: 11,
               fontWeight: FontWeight.w500,
+              letterSpacing: 0.4,
             ),
           ),
           const SizedBox(height: 8),

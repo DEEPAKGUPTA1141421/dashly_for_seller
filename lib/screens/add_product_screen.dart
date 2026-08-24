@@ -229,7 +229,7 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
 
         body: Column(
           children: [
-            _StepBar(
+            StepBar(
               current:     step,
               maxReached:  state.maxReachedStep,
               total:       _stepLabels.length,
@@ -368,7 +368,7 @@ class AddProductChoiceTile extends StatelessWidget {
 
 // ── Scrollable step icon bar ──────────────────────────────────────────────────
 
-class _StepBar extends StatelessWidget {
+class StepBar extends StatelessWidget {
   final int current;
   final int maxReached;
   final int total;
@@ -376,7 +376,8 @@ class _StepBar extends StatelessWidget {
   final List<String> labels;
   final void Function(int)? onStepTap;
 
-  const _StepBar({
+  const StepBar({
+    super.key,
     required this.current,
     required this.maxReached,
     required this.total,

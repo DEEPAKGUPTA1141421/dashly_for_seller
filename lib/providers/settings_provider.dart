@@ -20,6 +20,7 @@ class SettingsState {
   final Map<String, dynamic> bank;
   final Map<String, dynamic> notifications;
   final Map<String, dynamic> preferences;
+  final Map<String, dynamic> kyc;
   final bool onboardingComplete;
   final String? onboardingStage;
 
@@ -33,6 +34,7 @@ class SettingsState {
     this.bank              = const {},
     this.notifications     = const {},
     this.preferences       = const {},
+    this.kyc                = const {},
     this.onboardingComplete = true, // default true to avoid flashing banner before load
     this.onboardingStage,
   });
@@ -50,6 +52,7 @@ class SettingsState {
     Map<String, dynamic>? bank,
     Map<String, dynamic>? notifications,
     Map<String, dynamic>? preferences,
+    Map<String, dynamic>? kyc,
     bool? onboardingComplete,
     String? onboardingStage,
   }) {
@@ -63,6 +66,7 @@ class SettingsState {
       bank:               bank               ?? this.bank,
       notifications:      notifications      ?? this.notifications,
       preferences:        preferences        ?? this.preferences,
+      kyc:                kyc                ?? this.kyc,
       onboardingComplete: onboardingComplete ?? this.onboardingComplete,
       onboardingStage:    onboardingStage    ?? this.onboardingStage,
     );
@@ -92,6 +96,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
         bank:               _asMap(data['bank']),
         notifications:      _asMap(data['notifications']),
         preferences:        _asMap(data['preferences']),
+        kyc:                _asMap(data['kyc']),
         onboardingComplete: (data['onboardingComplete'] as bool?) ?? false,
         onboardingStage:    data['onboardingStage'] as String?,
       );
@@ -104,11 +109,12 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
 
   // ── Personal Info ─────────────────────────────────────────────────────────
   // PUT /api/v1/seller/settings/personal  (multipart/form-data)
-  // Fields: fullName, displayName, email, phone, profileImage (file), mediaFiles (files)
+  // Fields: fullName, displayName, phone, profileImage (file), mediaFiles (files)
+  // NOTE: email is intentionally excluded — it can only change via the
+  // OTP-verified requestEmailUpdate()/verifyEmailUpdate() flow below.
   Future<bool> updatePersonalInfo({
     required String fullName,
     required String displayName,
-    required String email,
     required String phone,
     Uint8List? profilePhotoBytes,
     String profilePhotoName = 'profile.jpg',
@@ -122,7 +128,6 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
       // Only include fields that actually changed
       if (fullName    != (stored['fullName']    as String? ?? '')) formMap['fullName']    = fullName;
       if (displayName != (stored['displayName'] as String? ?? '')) formMap['displayName'] = displayName;
-      if (email       != (stored['email']       as String? ?? '')) formMap['email']       = email;
       if (phone       != (stored['phone']       as String? ?? '')) formMap['phone']       = phone;
 
       if (profilePhotoBytes != null) {
@@ -161,6 +166,56 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
         return true;
       }
       state = state.copyWith(clearSaving: true, error: body['message'] ?? 'Failed to save');
+      return false;
+    } on DioException catch (e) {
+      state = state.copyWith(clearSaving: true, error: AppException.fromDioError(e).message);
+      return false;
+    }
+  }
+
+  // ── Email Change (OTP verified) ───────────────────────────────────────────
+  // POST /api/v1/seller/settings/personal/email/request  (JSON: { email })
+  // Sends an OTP to the NEW email; it is staged server-side as "pending" and
+  // is only committed once verifyEmailUpdate() confirms the code.
+  Future<bool> requestEmailUpdate(String email) async {
+    state = state.copyWith(savingSection: 'email', clearError: true, clearSuccess: true);
+    try {
+      final res  = await _client.post(ApiEndpoints.settingsEmailRequest, data: {'email': email});
+      final body = res.data as Map<String, dynamic>;
+      if (body['success'] == true) {
+        state = state.copyWith(clearSaving: true, successMessage: body['message'] as String? ?? 'OTP sent');
+        return true;
+      }
+      state = state.copyWith(clearSaving: true, error: body['message'] ?? 'Failed to send OTP');
+      return false;
+    } on DioException catch (e) {
+      state = state.copyWith(clearSaving: true, error: AppException.fromDioError(e).message);
+      return false;
+    }
+  }
+
+  // POST /api/v1/seller/settings/personal/email/verify  (JSON: { otp })
+  Future<bool> verifyEmailUpdate(String otp) async {
+    state = state.copyWith(savingSection: 'email', clearError: true, clearSuccess: true);
+    try {
+      final res  = await _client.post(ApiEndpoints.settingsEmailVerify, data: {'otp': otp});
+      final body = res.data as Map<String, dynamic>;
+      if (body['success'] == true) {
+        final data = _asMap(body['data']);
+        final updatedPersonal = {
+          ...state.personal,
+          if (data['email'] != null) 'email': data['email'],
+          'emailVerified': true,
+          'pendingEmail': null,
+        };
+        state = state.copyWith(
+          clearSaving:    true,
+          personal:       updatedPersonal,
+          successMessage: 'Email verified and updated',
+        );
+        return true;
+      }
+      state = state.copyWith(clearSaving: true, error: body['message'] ?? 'Invalid OTP');
       return false;
     } on DioException catch (e) {
       state = state.copyWith(clearSaving: true, error: AppException.fromDioError(e).message);
@@ -229,6 +284,86 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
           clearSaving:    true,
           bank:           updated.isNotEmpty ? updated : state.bank,
           successMessage: 'Bank details updated',
+        );
+        return true;
+      }
+      state = state.copyWith(clearSaving: true, error: body['message'] ?? 'Failed to save');
+      return false;
+    } on DioException catch (e) {
+      state = state.copyWith(clearSaving: true, error: AppException.fromDioError(e).message);
+      return false;
+    }
+  }
+
+  // ── KYC Documents (Aadhaar mandatory, PAN mandatory, GST optional) ────────
+  // Each document type is submitted independently — a seller can add Aadhaar
+  // now, come back later for PAN, and add GST whenever. Once Aadhaar + PAN
+  // are both saved the backend auto-submits the whole thing for review.
+
+  // POST /api/v1/seller/product/kyc/documents/aadhaar  (multipart/form-data)
+  Future<bool> submitAadhaarDocuments({
+    required String aadhaarNumber,
+    required Uint8List frontBytes,
+    required Uint8List backBytes,
+  }) => _submitKycSection(
+        section: 'kyc-aadhaar',
+        endpoint: ApiEndpoints.kycDocumentsAadhaar,
+        formMap: {
+          'aadhaarNumber': aadhaarNumber,
+          'aadhaarFront':  MultipartFile.fromBytes(frontBytes, filename: 'aadhaar_front.jpg'),
+          'aadhaarBack':   MultipartFile.fromBytes(backBytes,  filename: 'aadhaar_back.jpg'),
+        },
+        defaultSuccessMessage: 'Aadhaar details saved',
+      );
+
+  // POST /api/v1/seller/product/kyc/documents/pan  (multipart/form-data)
+  Future<bool> submitPanDocument({
+    required String panNumber,
+    required Uint8List docBytes,
+  }) => _submitKycSection(
+        section: 'kyc-pan',
+        endpoint: ApiEndpoints.kycDocumentsPan,
+        formMap: {
+          'panNumber':   panNumber,
+          'panDocument': MultipartFile.fromBytes(docBytes, filename: 'pan_document.jpg'),
+        },
+        defaultSuccessMessage: 'PAN details saved',
+      );
+
+  // POST /api/v1/seller/product/kyc/documents/gst  (multipart/form-data)
+  Future<bool> submitGstDocument({
+    required String gstNumber,
+    required Uint8List docBytes,
+  }) => _submitKycSection(
+        section: 'kyc-gst',
+        endpoint: ApiEndpoints.kycDocumentsGst,
+        formMap: {
+          'gstNumber':   gstNumber,
+          'gstDocument': MultipartFile.fromBytes(docBytes, filename: 'gst_document.jpg'),
+        },
+        defaultSuccessMessage: 'GST details saved',
+      );
+
+  Future<bool> _submitKycSection({
+    required String section,
+    required String endpoint,
+    required Map<String, dynamic> formMap,
+    required String defaultSuccessMessage,
+  }) async {
+    state = state.copyWith(savingSection: section, clearError: true, clearSuccess: true);
+    try {
+      final res  = await _client.post(
+        endpoint,
+        data: FormData.fromMap(formMap),
+        options: Options(contentType: 'multipart/form-data'),
+      );
+      final body = res.data as Map<String, dynamic>;
+      if (body['success'] == true) {
+        final updated = _asMap(body['data']);
+        state = state.copyWith(
+          clearSaving:    true,
+          kyc:            updated.isNotEmpty ? updated : state.kyc,
+          successMessage: body['message'] as String? ?? defaultSuccessMessage,
         );
         return true;
       }

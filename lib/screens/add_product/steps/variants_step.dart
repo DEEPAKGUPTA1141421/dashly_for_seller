@@ -287,7 +287,13 @@ class _VariantsStepState extends ConsumerState<VariantsStep> {
         // ── Continue button ────────────────────────────────────────────────
         Consumer(
           builder: (_, ref, __) {
-            final saving = ref.watch(addProductPod).isCreating;
+            final state  = ref.watch(addProductPod);
+            final saving = state.isCreating;
+            final label  = state.isEditMode
+                ? 'Update  ($doneCount SKU${doneCount > 1 ? 's' : ''})'
+                : (doneCount == 0
+                    ? 'Skip Variants'
+                    : 'Continue  ($doneCount SKU${doneCount > 1 ? 's' : ''} ready)');
             return Container(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
               decoration: const BoxDecoration(
@@ -296,11 +302,9 @@ class _VariantsStepState extends ConsumerState<VariantsStep> {
               ),
               child: AppButton(
                 isLoading: saving,
-                label: doneCount == 0
-                    ? 'Skip Variants'
-                    : 'Continue  ($doneCount SKU${doneCount > 1 ? 's' : ''} ready)',
+                label: label,
                 onTap: _next,
-                icon:  Icons.arrow_forward_rounded,
+                icon:  state.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
               ),
             );
           },
@@ -703,7 +707,7 @@ class _EmptyView extends StatelessWidget {
                       textAlign: TextAlign.center),
                   const SizedBox(height: 8),
                   const Text(
-                    'Go back and select values for attributes\nmarked VARIANTS (e.g. Size → S, M, L).',
+                    'Go back and select values for attributes.',
                     style: TextStyle(
                         color:  AppColors.grey,
                         fontSize: 13,

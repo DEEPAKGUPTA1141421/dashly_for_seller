@@ -126,21 +126,35 @@ class ProductCardShimmer extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppShimmer(
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
         ),
-        child: const Row(
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ShimmerBox(width: 40, height: 40, borderRadius: 8),
-            SizedBox(width: 12),
-            Expanded(child: ShimmerBox(width: double.infinity, height: 13)),
-            SizedBox(width: 10),
-            ShimmerBox(width: 50, height: 13),
-            SizedBox(width: 18),
+            AspectRatio(
+              aspectRatio: 1,
+              child: ShimmerBox(
+                width: double.infinity,
+                height: double.infinity,
+                borderRadius: 0,
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ShimmerBox(width: double.infinity, height: 12),
+                  SizedBox(height: 8),
+                  ShimmerBox(width: 80, height: 10),
+                  SizedBox(height: 10),
+                  ShimmerBox(width: 60, height: 13),
+                ],
+              ),
+            ),
           ],
         ),
       ),

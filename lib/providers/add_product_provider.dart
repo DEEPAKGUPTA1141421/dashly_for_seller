@@ -65,6 +65,10 @@ class AddProductState {
   final bool draftChecked;
   final bool hasDraft;
 
+  // True when this state represents editing an existing LIVE product
+  // rather than the linear create-wizard flow.
+  final bool isEditMode;
+
   const AddProductState({
     this.isLoading       = false,
     this.isCreating      = false,
@@ -74,6 +78,7 @@ class AddProductState {
     this.maxReachedStep   = 0,
     this.draftChecked    = false,
     this.hasDraft        = false,
+    this.isEditMode      = false,
     this.categories      = const [],
     this.brands          = const [],
     this.attributes      = const [],
@@ -129,6 +134,7 @@ class AddProductState {
     String? createdProductId,
     bool? draftChecked,
     bool? hasDraft,
+    bool? isEditMode,
   }) {
     return AddProductState(
       isLoading:        isLoading        ?? this.isLoading,
@@ -139,6 +145,7 @@ class AddProductState {
       maxReachedStep:   maxReachedStep   ?? this.maxReachedStep,
       draftChecked:     draftChecked     ?? this.draftChecked,
       hasDraft:         hasDraft         ?? this.hasDraft,
+      isEditMode:       isEditMode       ?? this.isEditMode,
       categories:       categories       ?? this.categories,
       brands:           brands           ?? this.brands,
       attributes:       attributes       ?? this.attributes,
@@ -186,8 +193,7 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
   Future<void> init() async {
     state = state.copyWith(isLoading: true, error: null);
 
-    List<dynamic> cats   = [];
-    List<dynamic> brands = [];
+    List<dynamic> cats = [];
 
     try {
       final res = await _client.get(ApiEndpoints.sellerCategories);
@@ -196,12 +202,9 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       state = state.copyWith(error: AppException.fromDioError(e).message);
     } catch (_) {}
 
-    try {
-      final res = await _client.get(ApiEndpoints.brands);
-      brands = _list(res.data);
-    } catch (_) {}
-
-    state = state.copyWith(isLoading: false, categories: cats, brands: brands);
+    // Brands are fetched lazily by the brand-picker sheet in step 5
+    // (scoped to the chosen category), not eagerly here.
+    state = state.copyWith(isLoading: false, categories: cats);
   }
 
   // ── Draft / Resume ───────────────────────────────────────────────────────
@@ -341,6 +344,161 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     );
   }
 
+  // ── Edit an existing (already-LIVE) product ────────────────────────────────
+  // Raw variant rows from GET /variants, kept around so saveVariantsAndContinue
+  // can diff new combos against them (the add-variants endpoint is append-only).
+  List<Map<String, dynamic>> _existingVariants = [];
+
+  // categoryAttributeId → existing productAttributeId, so saveAttributesAndContinue
+  // can UPDATE the existing row instead of creating a duplicate ProductAttribute.
+  Map<String, String> _existingAttributeIds = {};
+
+  Future<void> loadForEdit(String productId) async {
+    state = state.copyWith(isLoading: true, error: null, isEditMode: true);
+
+    Map<String, dynamic> editData = {};
+    try {
+      final res  = await _client.get('${ApiEndpoints.sellerProductBase}/$productId/edit-data');
+      final body = res.data as Map<String, dynamic>;
+      editData   = (body['data'] as Map<String, dynamic>?) ?? {};
+    } catch (e) {
+      state = state.copyWith(isLoading: false, isEditMode: true,
+          error: e is DioException ? AppException.fromDioError(e).message : e.toString());
+      return;
+    }
+
+    final name        = editData['name'] as String? ?? '';
+    final desc        = editData['description'] as String? ?? '';
+    final categoryId  = editData['categoryId'] as String?;
+    final categoryName = editData['categoryName'] as String? ?? '';
+    final brandId      = editData['brandId'] as String?;
+    final brandName    = editData['brandName'] as String?;
+    final tags = (editData['tags'] as List<dynamic>?)
+        ?.map((t) => (t as Map<String, dynamic>)['name']?.toString() ?? '')
+        .where((t) => t.isNotEmpty)
+        .toList() ?? [];
+
+    // Attribute values — mirrors resumeDraft's parsing so both AttributesStep
+    // and the ImagesStep's per-value sections (which key off attributeValues
+    // to know which values need a photo slot) work the same as in create mode.
+    // Existing images for image-type attributes are captured separately, keyed
+    // the same way the create-wizard keys them: "{categoryAttributeId}::{value}".
+    final rawAttrs = (editData['attributes'] as List<dynamic>?) ?? [];
+    final attributeValues = <String, String>{};
+    final attributeImages = <String, List<String>>{};
+    final existingAttributeIds = <String, String>{};
+    for (final a in rawAttrs) {
+      final attr      = a as Map<String, dynamic>;
+      final catAttrId = attr['categoryAttributeId']?.toString() ?? '';
+      final val       = attr['value']?.toString() ?? '';
+      if (catAttrId.isEmpty || val.isEmpty) continue;
+      // A variant-defining attribute (e.g. Color) has one ProductAttribute row
+      // per distinct value used across the product's variants — merge them into
+      // the same comma-separated format the create wizard uses, instead of the
+      // last row silently overwriting the rest.
+      final existingVals = attributeValues[catAttrId]?.split(',').map((v) => v.trim()).toSet() ?? <String>{};
+      existingVals.add(val);
+      attributeValues[catAttrId] = existingVals.join(',');
+      final prodAttrId = attr['productAttributeId']?.toString();
+      if (prodAttrId != null && prodAttrId.isNotEmpty) existingAttributeIds[catAttrId] = prodAttrId;
+      if (attr['isImage'] == true) {
+        final urls = (attr['images'] as List<dynamic>?)
+            ?.map((u) => u.toString())
+            .where((u) => u.isNotEmpty)
+            .toList() ?? [];
+        if (urls.isNotEmpty) attributeImages['$catAttrId::$val'] = urls;
+      }
+    }
+
+    // Category attribute definitions (needed for the Attributes/Variants step UI)
+    List<dynamic> attrs = [];
+    if (categoryId != null) {
+      try {
+        final res  = await _client.get('${ApiEndpoints.categoryAttributes}/$categoryId');
+        final body = res.data as Map<String, dynamic>;
+        final d    = body['data'] as Map<String, dynamic>? ?? {};
+        attrs = (d['attributeIds'] as List<dynamic>?) ?? [];
+      } catch (_) {}
+    }
+
+    // Existing variants
+    List<Map<String, dynamic>> variants = [];
+    try {
+      final res  = await _client.get('${ApiEndpoints.sellerProductBase}/$productId/variants');
+      final body = res.data as Map<String, dynamic>;
+      final list = (body['data'] as List<dynamic>?) ?? [];
+      variants = list.map((v) {
+        final m = v as Map<String, dynamic>;
+        return {
+          'id':          m['id']?.toString(),
+          'label':       m['label']?.toString() ?? '',
+          'combination': Map<String, String>.from(
+              (m['combination'] as Map<dynamic, dynamic>? ?? {})
+                  .map((k, v) => MapEntry(k.toString(), v.toString()))),
+          'price':  double.tryParse(m['priceRupees']?.toString() ?? '') ?? 0,
+          'mrp':    double.tryParse(m['mrpRupees']?.toString() ?? '') ?? 0,
+          'stock':  m['stock'] is num ? (m['stock'] as num).toInt() : int.tryParse(m['stock']?.toString() ?? '') ?? 0,
+          'sku':    m['sku']?.toString() ?? '',
+        };
+      }).toList();
+    } catch (_) {}
+    _existingVariants = variants;
+    _existingAttributeIds = existingAttributeIds;
+
+    // Existing cover image
+    final coverImages = <String>[];
+    final mediaTypes  = <String, String>{};
+    try {
+      final res  = await _client.get('${ApiEndpoints.sellerProductBase}/$productId/media');
+      final body = res.data as Map<String, dynamic>;
+      final list = (body['data'] as List<dynamic>?) ?? [];
+      final cover = list.cast<Map<String, dynamic>>().firstWhere(
+        (m) => m['isCover'] == true,
+        orElse: () => list.isNotEmpty ? list.first as Map<String, dynamic> : <String, dynamic>{},
+      );
+      final url = cover['url']?.toString();
+      if (url != null && url.isNotEmpty) {
+        coverImages.add(url);
+        final mt = cover['mediaType']?.toString().toLowerCase();
+        mediaTypes[url] = mt == 'video' ? 'video' : 'image';
+      }
+    } catch (_) {}
+
+    _savedName           = name;
+    _savedDesc           = desc;
+    _savedAttrValuesJson = jsonEncode(attributeValues);
+    _savedVariantsJson   = jsonEncode(variants);
+    _savedImagePathsJson = jsonEncode(coverImages);
+    _savedAttrImagesJson = jsonEncode(attributeImages);
+    _savedBrandId        = brandId;
+    _savedTagsJson       = jsonEncode(tags);
+
+    state = AddProductState(
+      categories:       state.categories,
+      brands:           state.brands,
+      draftChecked:     true,
+      hasDraft:         false,
+      isEditMode:       true,
+      createdProductId: productId,
+      productName:      name,
+      description:      desc,
+      categoryId:       categoryId,
+      categoryName:     categoryName,
+      attributes:       attrs,
+      attributeValues:  attributeValues,
+      variants:         variants,
+      imagePaths:       coverImages,
+      attributeImages:  attributeImages,
+      mediaTypes:       mediaTypes,
+      tags:             tags,
+      brandId:          brandId,
+      brandName:        brandName,
+      // Edit steps (no Category step): 0=BasicInfo 1=Attributes 2=Variants 3=Photos 4=Brand&Tags
+      currentStep:      0,
+      maxReachedStep:   4,
+    );
+  }
+
   Future<void> discardDraft() async {
     _pendingDraftData = null;
     try {
@@ -370,7 +528,7 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         name == _savedName && desc == _savedDesc) {
       state = state.copyWith(
         productName: name, description: desc,
-        currentStep: 2, maxReachedStep: max(state.maxReachedStep, 2),
+        currentStep: state.isEditMode ? 1 : 2, maxReachedStep: max(state.maxReachedStep, 2),
       );
       return true;
     }
@@ -401,7 +559,7 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
           productName:      name,
           description:      desc,
           createdProductId: productId,
-          currentStep:      2,
+          currentStep:      state.isEditMode ? 1 : 2,
           maxReachedStep:   max(state.maxReachedStep, 2),
         );
         return true;
@@ -426,7 +584,7 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     if (state.createdProductId != null && valuesJson == _savedAttrValuesJson) {
       state = state.copyWith(
         attributeValues: values,
-        currentStep: 3, maxReachedStep: max(state.maxReachedStep, 3),
+        currentStep: state.isEditMode ? 2 : 3, maxReachedStep: max(state.maxReachedStep, 3),
       );
       return true;
     }
@@ -441,11 +599,15 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
         values.forEach((attrId, rawValue) {
           if (rawValue.trim().isEmpty) return;
+          final vals = rawValue.split(',').map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
           catAttrIds.add(attrId);
-          attrValues.add(
-            rawValue.split(',').map((v) => v.trim()).where((v) => v.isNotEmpty).toList(),
-          );
-          prodAttrIds.add(null);
+          attrValues.add(vals);
+          // One entry per value (matches the backend's flat index) — reuse the
+          // existing row's id in edit mode so this UPDATEs instead of duplicating.
+          final existingId = state.isEditMode ? _existingAttributeIds[attrId] : null;
+          for (var i = 0; i < vals.length; i++) {
+            prodAttrIds.add(existingId);
+          }
         });
 
         if (catAttrIds.isNotEmpty) {
@@ -459,7 +621,11 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         }
       }
       _savedAttrValuesJson = valuesJson;
-      state = state.copyWith(isCreating: false, currentStep: 3, maxReachedStep: max(state.maxReachedStep, 3));
+      state = state.copyWith(
+        isCreating: false,
+        currentStep: state.isEditMode ? 2 : 3,
+        maxReachedStep: max(state.maxReachedStep, 3),
+      );
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
@@ -476,7 +642,7 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     if (state.createdProductId != null && variantsJson == _savedVariantsJson) {
       state = state.copyWith(
         variants: variants,
-        currentStep: 4, maxReachedStep: max(state.maxReachedStep, 4),
+        currentStep: state.isEditMode ? 3 : 4, maxReachedStep: max(state.maxReachedStep, 4),
       );
       return true;
     }
@@ -485,13 +651,55 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     try {
       final productId = state.createdProductId;
       if (productId != null && variants.isNotEmpty) {
-        await _client.post(ApiEndpoints.sellerProductAddVariants, data: {
-          'productId': productId,
-          'variants':  variants,
-        });
+        if (state.isEditMode) {
+          // add-variants is append-only on the backend — only POST combos
+          // that don't already exist, and PATCH price/stock changes on the rest.
+          final newVariants = <Map<String, dynamic>>[];
+          for (final v in variants) {
+            final combo = Map<String, String>.from(v['combination'] as Map);
+            final existing = _existingVariants.firstWhere(
+              (e) => _combosEqual(e['combination'] as Map<String, String>, combo),
+              orElse: () => const {},
+            );
+            if (existing.isEmpty) {
+              newVariants.add(v);
+              continue;
+            }
+            final priceInPaise = ((v['price'] as num?) ?? 0) * 100;
+            final stock        = (v['stock'] as num?)?.toInt() ?? 0;
+            final priceChanged = priceInPaise.round() != (((existing['price'] as num?) ?? 0) * 100).round();
+            final stockChanged = stock != ((existing['stock'] as num?) ?? 0);
+            if (priceChanged || stockChanged) {
+              try {
+                await _client.patch(
+                  '${ApiEndpoints.sellerProductBase}/$productId/variants/${existing['id']}',
+                  data: {
+                    if (priceChanged) 'priceInPaise': priceInPaise.round(),
+                    if (stockChanged) 'stock': stock,
+                  },
+                );
+              } catch (_) {}
+            }
+          }
+          if (newVariants.isNotEmpty) {
+            await _client.post(ApiEndpoints.sellerProductAddVariants, data: {
+              'productId': productId,
+              'variants':  newVariants,
+            });
+          }
+        } else {
+          await _client.post(ApiEndpoints.sellerProductAddVariants, data: {
+            'productId': productId,
+            'variants':  variants,
+          });
+        }
       }
       _savedVariantsJson = variantsJson;
-      state = state.copyWith(isCreating: false, currentStep: 4, maxReachedStep: max(state.maxReachedStep, 4));
+      state = state.copyWith(
+        isCreating: false,
+        currentStep: state.isEditMode ? 3 : 4,
+        maxReachedStep: max(state.maxReachedStep, 4),
+      );
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
@@ -500,6 +708,14 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       state = state.copyWith(isCreating: false, error: e.toString());
       return false;
     }
+  }
+
+  bool _combosEqual(Map<String, String> a, Map<String, String> b) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (b[entry.key] != entry.value) return false;
+    }
+    return true;
   }
 
   // ── Step 4 – Media (Images + Videos) ─────────────────────────────────────
@@ -562,7 +778,7 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         pathsJson == _savedImagePathsJson &&
         attrImgJson == _savedAttrImagesJson) {
       state = state.copyWith(
-        currentStep: 5, maxReachedStep: max(state.maxReachedStep, 5),
+        currentStep: state.isEditMode ? 4 : 5, maxReachedStep: max(state.maxReachedStep, 5),
       );
       return true;
     }
@@ -603,7 +819,11 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       }
       _savedImagePathsJson = pathsJson;
       _savedAttrImagesJson = attrImgJson;
-      state = state.copyWith(isCreating: false, currentStep: 5, maxReachedStep: max(state.maxReachedStep, 5));
+      state = state.copyWith(
+        isCreating: false,
+        currentStep: state.isEditMode ? 4 : 5,
+        maxReachedStep: max(state.maxReachedStep, 5),
+      );
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
@@ -662,7 +882,8 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     if (brandId == _savedBrandId && tagsJson == _savedTagsJson) {
       state = state.copyWith(
         brandId: brandId, brandName: brandName, tags: tags,
-        currentStep: 6, maxReachedStep: max(state.maxReachedStep, 6),
+        currentStep: state.isEditMode ? state.currentStep : 6,
+        maxReachedStep: max(state.maxReachedStep, 6),
       );
       return true;
     }
@@ -694,7 +915,11 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
       _savedBrandId  = brandId;
       _savedTagsJson = tagsJson;
-      state = state.copyWith(isCreating: false, currentStep: 6, maxReachedStep: max(state.maxReachedStep, 6));
+      state = state.copyWith(
+        isCreating: false,
+        currentStep: state.isEditMode ? state.currentStep : 6,
+        maxReachedStep: max(state.maxReachedStep, 6),
+      );
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);

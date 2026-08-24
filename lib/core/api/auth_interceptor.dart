@@ -29,6 +29,10 @@ class AuthInterceptor extends Interceptor {
   }
 
   // ── On 401/403: attempt token refresh once, then retry ────────────────────
+  // The backend's JWT filter doesn't reject an expired/invalid access token
+  // outright — it just leaves the request unauthenticated, so Spring
+  // Security's @PreAuthorize check fails it as 403 (not 401). Both therefore
+  // need the same refresh-and-retry handling.
   @override
   Future<void> onError(
     DioException err,
@@ -36,11 +40,11 @@ class AuthInterceptor extends Interceptor {
   ) async {
     final statusCode = err.response?.statusCode;
 
-    if (statusCode != 401) {
+    if (statusCode != 401 && statusCode != 403) {
       return handler.next(err);
     }
 
-    // Refresh endpoint itself returned 401 → full logout
+    // Refresh endpoint itself returned 401/403 → full logout
     if (err.requestOptions.path.contains(ApiEndpoints.refresh)) {
       await _clearAndDrain(err, handler);
       return;
@@ -91,11 +95,9 @@ class AuthInterceptor extends Interceptor {
           refreshToken: newRefresh,
         );
 
-        // Retry the original request with the new token
-        err.requestOptions.headers['Authorization'] = 'Bearer $newAccess';
-        final retried = await _dio.fetch(err.requestOptions);
-
-        // Drain queued requests
+        // Drain queued requests with the new token — their outcome (success
+        // or a genuine error) is unrelated to session validity, since the
+        // refresh above already succeeded.
         for (final item in _retryQueue) {
           item.options.headers['Authorization'] = 'Bearer $newAccess';
           _dio.fetch(item.options).then(
@@ -105,7 +107,17 @@ class AuthInterceptor extends Interceptor {
         }
         _retryQueue.clear();
 
-        return handler.resolve(retried);
+        // Retry the original request with the new token. A failure here
+        // (e.g. a genuine 403 for lacking permission on this resource) is
+        // NOT a session problem — the refresh just succeeded — so it's
+        // forwarded as a normal error instead of forcing a logout.
+        err.requestOptions.headers['Authorization'] = 'Bearer $newAccess';
+        try {
+          final retried = await _dio.fetch(err.requestOptions);
+          return handler.resolve(retried);
+        } on DioException catch (retryErr) {
+          return handler.next(retryErr);
+        }
       } else {
         await _clearAndDrain(err, handler);
       }

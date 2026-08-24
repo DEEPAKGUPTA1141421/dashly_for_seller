@@ -316,10 +316,10 @@ class _CategoryStepState extends ConsumerState<CategoryStep> {
                   ),
                 ),
               AppButton(
-                label: 'Continue',
+                label: state.isEditMode ? 'Update' : 'Continue',
                 onTap: _selectedId != null ? _next : null,
                 isLoading: state.isLoading,
-                icon: Icons.arrow_forward_rounded,
+                icon: state.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
               ),
             ],
           ),

@@ -737,7 +737,8 @@ class _BottomBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final saving = ref.watch(addProductPod).isCreating;
+    final state  = ref.watch(addProductPod);
+    final saving = state.isCreating;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
       decoration: const BoxDecoration(
@@ -746,9 +747,9 @@ class _BottomBar extends ConsumerWidget {
       ),
       child: AppButton(
         isLoading: saving,
-        label: 'Continue',
+        label: state.isEditMode ? 'Update' : 'Continue',
         onTap: onNext,
-        icon:  Icons.arrow_forward_rounded,
+        icon:  state.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
       ),
     );
   }

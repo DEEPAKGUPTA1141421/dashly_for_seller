@@ -129,57 +129,61 @@ class ProductsNotifier extends StateNotifier<ProductsState> {
 
   Dio get _client => ApiClient.instance.client;
 
-  // GET /api/v1/seller/product/my-products-es  (ES-backed, falls back to DB)
-  // GET /api/v1/seller/product/categories
-  // GET /api/v1/brand
-  Future<void> fetchProducts({ProductFilterParams? filters}) async {
+  // GET /api/v1/seller/product/my-products  (ES-backed search, falls back to DB if ES is down)
+  // GET /api/v1/seller/product/my-categories
+  Future<void> fetchProducts({ProductFilterParams? filters, String? query}) async {
     state = state.copyWith(isLoading: true, error: null);
 
-    // Each fetch is independent — a failed brands/categories call never
-    // blocks the products fetch.
+    // Each fetch is independent — a failed categories call never blocks
+    // the products fetch. Brands are fetched lazily (see fetchBrandsIfNeeded)
+    // only when the filter sheet is actually opened.
     final results = await Future.wait([
-      _fetchProductsSafe(filters: filters),
+      _fetchProductsSafe(filters: filters, query: query),
       if (state.categories.isEmpty) _fetchSafe(_client.get(ApiEndpoints.sellerCategories)),
-      if (state.brands.isEmpty)     _fetchSafe(_client.get(ApiEndpoints.brands)),
     ]);
 
     final products   = results[0];
     final categories = results.length > 1 ? results[1] : state.categories;
-    final brands     = results.length > 2 ? results[2] : state.brands;
 
     state = state.copyWith(
       isLoading:  false,
       error:      null,
       products:   products,
       categories: categories,
-      brands:     brands,
     );
   }
 
-  // Tries ES endpoint (with optional filter params) first, falls back to DB.
-  Future<List<dynamic>> _fetchProductsSafe({ProductFilterParams? filters}) async {
+  // GET /api/v1/brand — only called when the filter sheet is opened, since
+  // brands are only used there (not on the products list itself).
+  Future<void> fetchBrandsIfNeeded() async {
+    if (state.brands.isNotEmpty) return;
+    final brands = await _fetchSafe(_client.get(ApiEndpoints.brands));
+    state = state.copyWith(brands: brands);
+  }
+
+  Future<List<dynamic>> _fetchProductsSafe({ProductFilterParams? filters, String? query}) async {
     try {
       final params = <String, dynamic>{'page': 0, 'size': 50};
+      if (query != null && query.trim().isNotEmpty) params['query'] = query.trim();
       if (filters != null) {
         if (filters.categoryId != null) params['categoryId'] = filters.categoryId;
         if (filters.brandId    != null) params['brandId']    = filters.brandId;
         if (filters.minPrice   != null) params['minPrice']   = filters.minPrice;
         if (filters.maxPrice   != null) params['maxPrice']   = filters.maxPrice;
         params['sortBy'] = _toEsSortBy(filters.sort);
-      }
-      final res  = await _client.get(ApiEndpoints.sellerProductsEs, queryParameters: params);
-      final body = res.data as Map<String, dynamic>?;
-      final data = body?['data'] as Map<String, dynamic>?;
-      final list = data?['products'];
-      if (list is List && list.isNotEmpty) return List<dynamic>.from(list);
-    } catch (_) {}
 
-    // ES endpoint unavailable — fall back to DB endpoint
-    try {
-      final res = await _client.get(
-        ApiEndpoints.sellerProducts,
-        queryParameters: {'page': 0, 'size': 50},
-      );
+        // Status → backend isActive
+        if (filters.status == ProductStatusFilter.active)   params['isActive'] = true;
+        if (filters.status == ProductStatusFilter.inactive) params['isActive'] = false;
+
+        // Stock → backend maxStock (upper bound only; exact bucketing refined client-side)
+        if (filters.stock == ProductStockFilter.outOfStock) params['maxStock'] = 0;
+        if (filters.stock == ProductStockFilter.lowStock)   params['maxStock'] = 10;
+      }
+      final res  = await _client.get(ApiEndpoints.sellerProducts, queryParameters: params);
+      final body = res.data as Map<String, dynamic>?;
+      final data = body?['data'];
+      if (data is Map && data['products'] is List) return List<dynamic>.from(data['products'] as List);
       return _asList(res.data);
     } catch (e) {
       state = state.copyWith(error: e is DioException

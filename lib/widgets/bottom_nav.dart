@@ -44,14 +44,21 @@ class SellerBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border)),
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.4),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 64,
+          height: 76,
           child: Row(
             children: List.generate(_items.length, (i) {
               final selected = i == currentIndex;
@@ -62,34 +69,28 @@ class SellerBottomNav extends StatelessWidget {
                     HapticUtils.light();
                     onTap(i);
                   },
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOut,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: selected ? AppColors.surface2 : Colors.transparent,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
                           selected ? _items[i].activeIcon : _items[i].icon,
-                          size: 21,
-                          color: selected ? AppColors.white : AppColors.greyDark,
+                          size: 22,
+                          color: selected ? AppColors.white : AppColors.grey,
                         ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        _items[i].label,
-                        style: TextStyle(
-                          color: selected ? AppColors.white : AppColors.greyDark,
-                          fontSize: 10,
-                          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                          letterSpacing: 0.1,
+                        const SizedBox(height: 4),
+                        Text(
+                          _items[i].label,
+                          style: TextStyle(
+                            color: selected ? AppColors.white : AppColors.grey,
+                            fontSize: 10.5,
+                            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                            letterSpacing: 0.1,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               );

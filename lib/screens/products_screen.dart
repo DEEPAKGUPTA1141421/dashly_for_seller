@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -8,10 +10,10 @@ import '../core/widgets/confirm_modal.dart';
 import '../providers/products_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
-import '../widgets/product_edit_sheet.dart';
 import 'add_product/catalog_search_screen.dart';
 import 'add_product_screen.dart';
-import 'product_variants_screen.dart';
+import 'edit_product_screen.dart';
+import 'share_product_sheet.dart';
 
 class ProductsScreen extends ConsumerStatefulWidget {
   const ProductsScreen({super.key});
@@ -24,6 +26,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
   ProductFilterParams _filters = ProductFilterParams.defaults;
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -33,8 +36,25 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  // Debounced server-side search: ES-backed on the backend, with a DB fallback
+  // if Elasticsearch is down — see SellerService.getMyLiveProducts.
+  void _onSearchChanged(String v) {
+    setState(() => _query = v);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+      ref.read(productsPod.notifier).fetchProducts(filters: _filters, query: _query);
+    });
+  }
+
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    setState(() { _query = ''; _searchCtrl.clear(); });
+    ref.read(productsPod.notifier).fetchProducts(filters: _filters);
   }
 
   // ── Add-product choice modal ──────────────────────────────────────────────
@@ -224,18 +244,26 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
       builder: (_) => _FilterSheet(
         current: _filters,
         categories: state.categories,
-        brands:     state.brands,
+        brands:     ref.read(productsPod).brands,
       ),
     );
     if (result != null) {
+      final oldFilters = _filters;
       setState(() => _filters = result);
-      // Re-fetch from server when server-side filters change
-      final needsRefetch = result.categoryId != _filters.categoryId ||
-          result.brandId != _filters.brandId ||
-          result.minPrice != _filters.minPrice ||
-          result.maxPrice != _filters.maxPrice;
+      // Re-fetch from server whenever a server-supported filter changes
+      // (category, brand, price range, status, stock, or a backend-sortable order).
+      final sortIsServerSide = result.sort == ProductSortBy.priceAsc ||
+          result.sort == ProductSortBy.priceDesc ||
+          result.sort == ProductSortBy.newest;
+      final needsRefetch = result.categoryId != oldFilters.categoryId ||
+          result.brandId != oldFilters.brandId ||
+          result.minPrice != oldFilters.minPrice ||
+          result.maxPrice != oldFilters.maxPrice ||
+          result.status != oldFilters.status ||
+          result.stock != oldFilters.stock ||
+          (result.sort != oldFilters.sort && sortIsServerSide);
       if (needsRefetch) {
-        await ref.read(productsPod.notifier).fetchProducts(filters: result);
+        await ref.read(productsPod.notifier).fetchProducts(filters: result, query: _query);
       }
     }
   }
@@ -358,7 +386,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: TextField(
                 controller: _searchCtrl,
-                onChanged: (v) => setState(() => _query = v),
+                onChanged: _onSearchChanged,
                 style: const TextStyle(color: AppColors.white, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Search by name, brand, category…',
@@ -366,7 +394,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                   prefixIcon: const Icon(Icons.search_rounded, color: AppColors.grey, size: 20),
                   suffixIcon: _query.isNotEmpty
                       ? GestureDetector(
-                          onTap: () { setState(() { _query = ''; _searchCtrl.clear(); }); },
+                          onTap: _clearSearch,
                           child: const Icon(Icons.close_rounded, color: AppColors.grey, size: 18),
                         )
                       : null,
@@ -446,66 +474,60 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
             // ── List ──────────────────────────────────────────────────────
             Expanded(
               child: state.isLoading
-                  ? ListView.builder(
+                  ? GridView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
-                      itemCount: 8,
-                      itemBuilder: (_, __) => const Padding(
-                        padding: EdgeInsets.only(bottom: 12),
-                        child: ProductCardShimmer(),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.66,
                       ),
+                      itemCount: 8,
+                      itemBuilder: (_, __) => const ProductCardShimmer(),
                     )
                   : state.error != null && products.isEmpty
                       ? _ErrorRetry(
                           message: state.error!,
-                          onRetry: () => ref.read(productsPod.notifier).fetchProducts(),
+                          onRetry: () => ref.read(productsPod.notifier).fetchProducts(filters: _filters, query: _query),
                         )
                       : products.isEmpty
                           ? _EmptyProducts(
                               hasFilters: activeFilterCount > 0,
-                              onClear: () => setState(() {
-                                _filters = ProductFilterParams.defaults;
-                                _query   = '';
-                                _searchCtrl.clear();
-                              }),
+                              onClear: () {
+                                _searchDebounce?.cancel();
+                                setState(() {
+                                  _filters = ProductFilterParams.defaults;
+                                  _query   = '';
+                                  _searchCtrl.clear();
+                                });
+                                ref.read(productsPod.notifier).fetchProducts();
+                              },
                             )
                           : RefreshIndicator(
                               onRefresh: () async {
                                 HapticUtils.light();
-                                await ref.read(productsPod.notifier).fetchProducts(filters: _filters);
+                                await ref.read(productsPod.notifier).fetchProducts(filters: _filters, query: _query);
                               },
                               color: AppColors.white,
                               backgroundColor: AppColors.surface,
-                              child: ListView.builder(
-                                padding: const EdgeInsets.symmetric(horizontal: 20),
+                              child: GridView.builder(
+                                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 2,
+                                  mainAxisSpacing: 12,
+                                  crossAxisSpacing: 12,
+                                  childAspectRatio: 0.66,
+                                ),
                                 itemCount: products.length,
-                                itemBuilder: (_, i) => _ProductTile(
+                                itemBuilder: (_, i) => _ProductCard(
                                   product: products[i] as Map,
                                   index: i,
-                                  onEdit: () => ProductEditSheet.show(context, products[i] as Map),
-                                  onManageVariants: () {
-                                    HapticUtils.light();
-                                    Navigator.push(context, MaterialPageRoute(
-                                      builder: (_) => ProductVariantsScreen(
-                                        productId:   products[i]['id']   as String? ?? '',
-                                        productName: products[i]['name'] as String? ?? 'Product',
-                                      ),
-                                    ));
-                                  },
-                                  onStockIncrease: () {
-                                    HapticUtils.light();
-                                    final id        = products[i]['id'] as String? ?? '';
-                                    final variantId = products[i]['variantId']?.toString() ?? '';
-                                    final stock     = _stockOf(products[i]);
-                                    ref.read(productsPod.notifier).updateVariant(id, variantId, stock: stock + 1);
-                                  },
-                                  onStockDecrease: () {
-                                    HapticUtils.light();
-                                    final id        = products[i]['id'] as String? ?? '';
-                                    final variantId = products[i]['variantId']?.toString() ?? '';
-                                    final stock     = _stockOf(products[i]);
-                                    if (stock <= 0) return;
-                                    ref.read(productsPod.notifier).updateVariant(id, variantId, stock: stock - 1);
-                                  },
+                                  onEdit: () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => EditProductScreen(
+                                      productId: products[i]['id'] as String? ?? '',
+                                    ),
+                                  )).then((_) => ref.read(productsPod.notifier).fetchProducts(filters: _filters)),
+                                  onShare: () => showShareProductSheet(context, products[i] as Map),
                                   onDelete: () async {
                                     HapticUtils.medium();
                                     final confirmed = await showConfirmModal(
@@ -957,27 +979,23 @@ class _PriceField extends StatelessWidget {
   }
 }
 
-// ── Product tile ──────────────────────────────────────────────────────────────
+// ── Product card ──────────────────────────────────────────────────────────────
 
-class _ProductTile extends StatelessWidget {
+class _ProductCard extends StatelessWidget {
   final Map product;
   final int index;
   final VoidCallback onEdit;
-  final VoidCallback onManageVariants;
-  final VoidCallback onStockIncrease;
-  final VoidCallback onStockDecrease;
   final VoidCallback onDelete;
   final VoidCallback onToggleActive;
+  final VoidCallback onShare;
 
-  const _ProductTile({
+  const _ProductCard({
     required this.product,
     required this.index,
     required this.onEdit,
-    required this.onManageVariants,
-    required this.onStockIncrease,
-    required this.onStockDecrease,
     required this.onDelete,
     required this.onToggleActive,
+    required this.onShare,
   });
 
   @override
@@ -1009,139 +1027,146 @@ class _ProductTile extends StatelessWidget {
             : AppColors.error;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          // ── Image ──────────────────────────────────────────────
+          Stack(
             children: [
-              // Thumbnail
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+              AspectRatio(
+                aspectRatio: 1,
                 child: Container(
-                  width: 44, height: 44,
                   color: AppColors.surface2,
                   child: imageUrl.isNotEmpty
                       ? Image.network(imageUrl, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.image_rounded, color: AppColors.greyDark, size: 18))
-                      : const Icon(Icons.inventory_2_rounded, color: AppColors.greyDark, size: 18),
+                          errorBuilder: (_, __, ___) => const Icon(Icons.image_rounded, color: AppColors.greyDark, size: 28))
+                      : const Icon(Icons.inventory_2_rounded, color: AppColors.greyDark, size: 28),
                 ),
               ),
-              const SizedBox(width: 12),
-              // Name + subtitle
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              if (!isActive)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black.withOpacity(0.55),
+                    alignment: Alignment.center,
+                    child: const Text('INACTIVE',
+                        style: TextStyle(color: AppColors.white, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
+                  ),
+                ),
+              if (discount != null && discount > 0)
+                Positioned(
+                  top: 8, left: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.success,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('${discount.toInt()}% OFF',
+                        style: const TextStyle(color: AppColors.bg, fontSize: 10, fontWeight: FontWeight.w800)),
+                  ),
+                ),
+              Positioned(
+                top: 4, right: 4,
+                child: Row(
                   children: [
-                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                    if (subtitle.isNotEmpty)
-                      Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.grey, fontSize: 11)),
+                    GestureDetector(
+                      onTap: onShare,
+                      child: Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: AppColors.bg.withOpacity(0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.ios_share_rounded, color: AppColors.white, size: 15),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.bg.withOpacity(0.55),
+                        shape: BoxShape.circle,
+                      ),
+                      child: PopupMenuButton<String>(
+                        color: AppColors.surface2,
+                        padding: EdgeInsets.zero,
+                        icon: const Icon(Icons.more_vert_rounded, color: AppColors.white, size: 18),
+                        onSelected: (v) {
+                          if (v == 'edit')   onEdit();
+                          if (v == 'delete') onDelete();
+                          if (v == 'toggle') onToggleActive();
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(value: 'edit', child: Text('Edit', style: TextStyle(color: AppColors.white))),
+                          PopupMenuItem(
+                            value: 'toggle',
+                            child: Text(
+                              isActive ? 'Deactivate' : 'Activate',
+                              style: TextStyle(color: isActive ? AppColors.warning : AppColors.success),
+                            ),
+                          ),
+                          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppColors.error))),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              // Price + discount
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text('₹$priceStr', style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700)),
-                  if (discount != null && discount > 0)
-                    Text('${discount.toInt()}% off', style: const TextStyle(color: AppColors.success, fontSize: 10, fontWeight: FontWeight.w600)),
-                ],
-              ),
-              const SizedBox(width: 6),
-              // Status dot
-              Container(
-                width: 8, height: 8,
-                decoration: BoxDecoration(
-                  color: !isActive ? AppColors.greyDark : stock > 0 ? AppColors.success : AppColors.error,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              PopupMenuButton<String>(
-                color: AppColors.surface2,
-                padding: EdgeInsets.zero,
-                icon: const Icon(Icons.more_vert_rounded, color: AppColors.grey, size: 18),
-                onSelected: (v) {
-                  if (v == 'edit')     onEdit();
-                  if (v == 'variants') onManageVariants();
-                  if (v == 'delete')   onDelete();
-                  if (v == 'toggle')   onToggleActive();
-                },
-                itemBuilder: (_) => [
-                  const PopupMenuItem(value: 'edit',     child: Text('Edit',            style: TextStyle(color: AppColors.white))),
-                  const PopupMenuItem(value: 'variants', child: Text('Manage Variants', style: TextStyle(color: AppColors.white))),
-                  PopupMenuItem(
-                    value: 'toggle',
-                    child: Text(
-                      isActive ? 'Deactivate' : 'Activate',
-                      style: TextStyle(color: isActive ? AppColors.warning : AppColors.success),
-                    ),
-                  ),
-                  const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppColors.error))),
-                ],
               ),
             ],
           ),
 
-          // Stock controls + rating
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Row(
-              children: [
-                const SizedBox(width: 56),
-                Icon(Icons.inventory_2_outlined, color: stockColor, size: 12),
-                const SizedBox(width: 4),
-                Text('$stock in stock', style: TextStyle(color: stockColor, fontSize: 11, fontWeight: FontWeight.w600)),
-                if (rating != null && rating > 0) ...[
-                  const SizedBox(width: 10),
-                  const Icon(Icons.star_rounded, color: AppColors.warning, size: 11),
-                  const SizedBox(width: 2),
-                  Text(rating.toStringAsFixed(1), style: const TextStyle(color: AppColors.grey, fontSize: 11)),
+          // ── Details ────────────────────────────────────────────
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppColors.grey, fontSize: 11)),
+                  ],
+                  const Spacer(),
+                  Row(
+                    children: [
+                      Text('₹$priceStr', style: const TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w800)),
+                      if (rating != null && rating > 0) ...[
+                        const Spacer(),
+                        const Icon(Icons.star_rounded, color: AppColors.warning, size: 13),
+                        const SizedBox(width: 2),
+                        Text(rating.toStringAsFixed(1), style: const TextStyle(color: AppColors.grey, fontSize: 11)),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Container(
+                        width: 6, height: 6,
+                        decoration: BoxDecoration(color: stockColor, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        stock > 0 ? '$stock in stock' : 'Out of stock',
+                        style: TextStyle(color: stockColor, fontSize: 10.5, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
                 ],
-                const Spacer(),
-                _StockButton(icon: Icons.remove, onTap: onStockDecrease, enabled: stock > 0),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Text('$stock', style: const TextStyle(color: AppColors.white, fontSize: 12, fontWeight: FontWeight.w700)),
-                ),
-                _StockButton(icon: Icons.add, onTap: onStockIncrease, enabled: true),
-              ],
+              ),
             ),
           ),
         ],
       ),
-    ).animate().fadeIn(delay: Duration(milliseconds: index * 40)).slideX(begin: 0.03, end: 0);
-  }
-}
-
-class _StockButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool enabled;
-  const _StockButton({required this.icon, required this.onTap, required this.enabled});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Container(
-        width: 26, height: 26,
-        decoration: BoxDecoration(
-          color: enabled ? AppColors.surface2 : AppColors.surface2.withOpacity(0.4),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Icon(icon, size: 14, color: enabled ? AppColors.white : AppColors.greyDark),
-      ),
-    );
+    ).animate().fadeIn(delay: Duration(milliseconds: index * 40)).slideY(begin: 0.04, end: 0);
   }
 }
 

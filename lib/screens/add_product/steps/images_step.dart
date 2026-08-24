@@ -36,7 +36,9 @@ class _MediaDisplay extends StatelessWidget {
     if (type == 'video') {
       return _VideoPlaceholder(width: width, height: height);
     }
-    if (kIsWeb) {
+    // Already-uploaded media (edit mode) comes back as a CDN URL regardless
+    // of platform — only a freshly-picked local path should hit Image.file.
+    if (kIsWeb || path.startsWith('http')) {
       return Image.network(
         path,
         fit: fit,
@@ -356,11 +358,13 @@ class _ImagesStepState extends ConsumerState<ImagesStep> {
           ),
           child: AppButton(
             isLoading: s.isCreating,
-            label: paths.isNotEmpty
-                ? 'Upload & Continue (${paths.length} file${paths.length > 1 ? 's' : ''})'
-                : 'Skip for now',
+            label: s.isEditMode
+                ? 'Update Cover Photo'
+                : (paths.isNotEmpty
+                    ? 'Upload & Continue (${paths.length} file${paths.length > 1 ? 's' : ''})'
+                    : 'Skip for now'),
             onTap: () => ref.read(addProductPod.notifier).uploadImagesAndContinue(),
-            icon:  Icons.arrow_forward_rounded,
+            icon:  s.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
           ),
         ),
       ],

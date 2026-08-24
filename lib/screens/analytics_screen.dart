@@ -110,54 +110,65 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 20)),
 
-              // Summary cards
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: state.isLoading
-                      ? Row(children: [
-                          Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
-                          const SizedBox(width: 12),
-                          Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
-                          const SizedBox(width: 12),
-                          Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
-                        ])
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: _SummaryCard(label: 'Total Revenue', value: totalRevStr, change: revenueChange)),
-                            const SizedBox(width: 10),
-                            Expanded(child: _SummaryCard(label: 'Total Orders',  value: totalOrdersStr, change: ordersChange)),
-                            const SizedBox(width: 10),
-                            Expanded(child: _SummaryCard(label: 'Pending',       value: pendingStr)),
-                          ],
-                        ),
-                ).animate().fadeIn(delay: 80.ms),
-              ),
+              // Error state — don't show mock/zero stats when the fetch failed
+              if (!state.isLoading && state.error != null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    child: _AnalyticsErrorState(onRetry: _refresh),
+                  ).animate().fadeIn(),
+                ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 28)),
+              // Summary cards
+              if (state.isLoading || state.error == null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: state.isLoading
+                        ? Row(children: [
+                            Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
+                            const SizedBox(width: 12),
+                            Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
+                            const SizedBox(width: 12),
+                            Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
+                          ])
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: _SummaryCard(label: 'Total Revenue', value: totalRevStr, change: revenueChange)),
+                              const SizedBox(width: 10),
+                              Expanded(child: _SummaryCard(label: 'Total Orders',  value: totalOrdersStr, change: ordersChange)),
+                              const SizedBox(width: 10),
+                              Expanded(child: _SummaryCard(label: 'Pending',       value: pendingStr)),
+                            ],
+                          ),
+                  ).animate().fadeIn(delay: 80.ms),
+                ),
+
+              if (state.isLoading || state.error == null) const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
               // Revenue trend
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Revenue — Last ${state.selectedDays} Days',
-                        style: const TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 16),
-                      state.isLoading
-                          ? const AppShimmer(child: ShimmerBox(height: 220))
-                          : chart.isEmpty
-                              ? _EmptyChart()
-                              : _RevenueChart(data: chart, maxPaise: maxRev),
-                    ],
-                  ).animate().fadeIn(delay: 120.ms),
+              if (state.isLoading || state.error == null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Revenue — Last ${state.selectedDays} Days',
+                          style: const TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 16),
+                        state.isLoading
+                            ? const AppShimmer(child: ShimmerBox(height: 220))
+                            : chart.isEmpty
+                                ? _EmptyChart()
+                                : _RevenueChart(data: chart, maxPaise: maxRev),
+                      ],
+                    ).animate().fadeIn(delay: 120.ms),
+                  ),
                 ),
-              ),
 
               // Status breakdown
               if (!state.isLoading && (state.stats['statusBreakdown'] as Map?)?.isNotEmpty == true)
@@ -278,6 +289,56 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 }
 
 // ── Revenue bar chart ─────────────────────────────────────────────────────────
+
+class _AnalyticsErrorState extends StatelessWidget {
+  final Future<void> Function() onRetry;
+  const _AnalyticsErrorState({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: AppColors.grey, size: 32),
+          const SizedBox(height: 10),
+          const Text(
+            'Couldn\'t load analytics data',
+            style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w700),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Check your connection and try again',
+            style: TextStyle(color: AppColors.grey, fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 14),
+          GestureDetector(
+            onTap: () { HapticUtils.light(); onRetry(); },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'Retry',
+                style: TextStyle(color: AppColors.bg, fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _RevenueChart extends StatelessWidget {
   final List<dynamic> data;

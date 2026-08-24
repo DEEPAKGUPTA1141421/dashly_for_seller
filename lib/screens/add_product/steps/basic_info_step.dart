@@ -129,9 +129,9 @@ class _BasicInfoStepState extends ConsumerState<BasicInfoStep> {
             const SizedBox(height: 40),
 
             AppButton(
-              label: 'Continue',
+              label: state.isEditMode ? 'Update' : 'Continue',
               onTap: _next,
-              icon: Icons.arrow_forward_rounded,
+              icon: state.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
               isLoading: isCreating,
             ).animate().fadeIn(delay: 240.ms),
           ],

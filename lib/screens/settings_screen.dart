@@ -12,6 +12,7 @@ import '../core/api/api_endpoints.dart';
 import '../core/widgets/app_shimmer.dart';
 import '../core/widgets/app_toast.dart';
 import '../core/widgets/confirm_modal.dart';
+import '../core/widgets/fullscreen_image_viewer.dart';
 import '../providers/auth_provider.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
@@ -19,7 +20,7 @@ import '../utils/haptic_utils.dart';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-enum _Tab { personal, business, bank, notifications }
+enum _Tab { personal, business, kyc, bank, notifications }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -58,25 +59,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-              child: Row(
-                children: [
-                  const Text(
-                    'Settings',
-                    style: TextStyle(
-                      color: AppColors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  const Spacer(),
-                  GestureDetector(
+        child: CustomScrollView(
+          slivers: [
+            // ── App Bar ──────────────────────────────────────────────────
+            SliverAppBar(
+              pinned: true,
+              backgroundColor: AppColors.surface,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              automaticallyImplyLeading: false,
+              title: const Text(
+                'Settings',
+                style: TextStyle(
+                  color: AppColors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: GestureDetector(
                     onTap: () async {
                       HapticUtils.medium();
                       final confirm = await showConfirmModal(
@@ -94,65 +98,76 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       }
                     },
                     child: Container(
-                      width: 42,
-                      height: 42,
+                      width: 36,
+                      height: 36,
                       decoration: BoxDecoration(
                         color: AppColors.error.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: AppColors.error.withOpacity(0.3)),
                       ),
-                      child: const Icon(Icons.logout_rounded, color: AppColors.error, size: 20),
+                      child: const Icon(Icons.logout_rounded, color: AppColors.error, size: 18),
                     ),
                   ),
-                ],
-              ).animate().fadeIn(),
-            ),
-            const SizedBox(height: 16),
-
-            // Tab bar
-            SizedBox(
-              height: 38,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                children: _Tab.values.map((t) {
-                  final selected = t == _tab;
-                  return GestureDetector(
-                    onTap: () { HapticUtils.light(); setState(() => _tab = t); },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: selected ? AppColors.white : AppColors.surface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: selected ? AppColors.white : AppColors.border),
-                      ),
-                      child: Text(
-                        _tabLabel(t),
-                        style: TextStyle(
-                          color: selected ? AppColors.bg : AppColors.grey,
-                          fontSize: 12,
-                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+                ),
+              ],
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(height: 1, color: AppColors.divider),
               ),
-            ).animate().fadeIn(delay: 80.ms),
+            ),
 
-            const SizedBox(height: 4),
+            // ── Tab bar ──────────────────────────────────────────────────
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 16, bottom: 4),
+                child: SizedBox(
+                  height: 38,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    children: _Tab.values.map((t) {
+                      final selected = t == _tab;
+                      return GestureDetector(
+                        onTap: () { HapticUtils.light(); setState(() => _tab = t); },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: selected ? AppColors.white : AppColors.surface,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: selected ? AppColors.white : AppColors.border),
+                          ),
+                          child: Text(
+                            _tabLabel(t),
+                            style: TextStyle(
+                              color: selected ? AppColors.bg : AppColors.grey,
+                              fontSize: 12,
+                              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ).animate().fadeIn(delay: 80.ms),
+            ),
 
-            // Content
-            Expanded(
+            // ── Content ──────────────────────────────────────────────────
+            SliverToBoxAdapter(
               child: state.isLoading
-                  ? const Center(child: CircularProgressIndicator(color: AppColors.white))
-                  : SingleChildScrollView(
+                  ? const Padding(
+                      padding: EdgeInsets.only(top: 80),
+                      child: Center(child: CircularProgressIndicator(color: AppColors.white)),
+                    )
+                  : Padding(
                       padding: const EdgeInsets.all(20),
                       child: _buildTab(state),
                     ),
             ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         ),
       ),
@@ -163,6 +178,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     switch (_tab) {
       case _Tab.personal:      return _PersonalTab(data: state.personal);
       case _Tab.business:      return _BusinessTab(data: state.business);
+      case _Tab.kyc:           return _KycTab(data: state.kyc);
       case _Tab.bank:          return _BankTab(data: state.bank);
       case _Tab.notifications: return _NotificationsTab(data: state.notifications);
     }
@@ -172,6 +188,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     switch (t) {
       case _Tab.personal:      return 'Personal';
       case _Tab.business:      return 'Business';
+      case _Tab.kyc:           return 'Documents';
       case _Tab.bank:          return 'Bank';
       case _Tab.notifications: return 'Notifications';
     }
@@ -197,12 +214,14 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
   final _displayName = TextEditingController();
   final _email       = TextEditingController();
   final _phone       = TextEditingController();
+  final _emailOtp    = TextEditingController();
 
   Uint8List? _profilePhotoBytes;
   String     _profilePhotoName  = 'profile.jpg';
   List<String>      _existingMediaUrls = [];
   List<_LocalMedia> _newMediaItems     = [];
-  bool _initialized = false;
+  bool _initialized  = false;
+  bool _emailOtpSent = false;
 
   @override
   void initState() {
@@ -237,6 +256,7 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
   void dispose() {
     _fullName.dispose(); _displayName.dispose();
     _email.dispose();    _phone.dispose();
+    _emailOtp.dispose();
     super.dispose();
   }
 
@@ -271,7 +291,6 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
     await ref.read(settingsPod.notifier).updatePersonalInfo(
       fullName:          _fullName.text.trim(),
       displayName:       _displayName.text.trim(),
-      email:             _email.text.trim(),
       phone:             _phone.text.trim(),
       profilePhotoBytes: _profilePhotoBytes,
       profilePhotoName:  _profilePhotoName,
@@ -283,6 +302,33 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
   bool _isVideo(String name) {
     final ext = name.split('.').last.toLowerCase();
     return ['mp4', 'mov', 'avi', 'mkv'].contains(ext);
+  }
+
+  // ── Email OTP flow ──────────────────────────────────────────────────────
+  Future<void> _requestEmailOtp() async {
+    final email = _email.text.trim();
+    if (!email.contains('@') || !email.contains('.')) {
+      AppToast.show(context, message: 'Enter a valid email', type: ToastType.error);
+      return;
+    }
+    HapticUtils.medium();
+    final ok = await ref.read(settingsPod.notifier).requestEmailUpdate(email);
+    if (ok && mounted) setState(() => _emailOtpSent = true);
+  }
+
+  Future<void> _verifyEmailOtp() async {
+    if (_emailOtp.text.trim().length != 6) {
+      AppToast.show(context, message: 'Enter the 6-digit OTP', type: ToastType.error);
+      return;
+    }
+    HapticUtils.medium();
+    final ok = await ref.read(settingsPod.notifier).verifyEmailUpdate(_emailOtp.text.trim());
+    if (ok && mounted) setState(() { _emailOtpSent = false; _emailOtp.clear(); });
+  }
+
+  void _cancelEmailOtp() {
+    HapticUtils.light();
+    setState(() { _emailOtpSent = false; _emailOtp.clear(); });
   }
 
   @override
@@ -298,11 +344,21 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
         // ── Profile photo ─────────────────────────────────────────────────
         Row(
           children: [
-            GestureDetector(
-              onTap: _pickProfilePhoto,
-              child: Stack(
-                children: [
-                  Container(
+            Stack(
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    if (_profilePhotoBytes != null) {
+                      HapticUtils.light();
+                      showFullScreenImage(context, Image.memory(_profilePhotoBytes!, fit: BoxFit.contain));
+                    } else if (photoUrl != null) {
+                      HapticUtils.light();
+                      showFullScreenImage(context, CachedNetworkImage(imageUrl: photoUrl, fit: BoxFit.contain));
+                    } else {
+                      _pickProfilePhoto();
+                    }
+                  },
+                  child: Container(
                     width: 72, height: 72,
                     decoration: BoxDecoration(
                       color: AppColors.surface2,
@@ -318,16 +374,19 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
                               : const Icon(Icons.person_rounded, color: AppColors.grey, size: 32),
                     ),
                   ),
-                  Positioned(
-                    right: 0, bottom: 0,
+                ),
+                Positioned(
+                  right: 0, bottom: 0,
+                  child: GestureDetector(
+                    onTap: _pickProfilePhoto,
                     child: Container(
                       width: 24, height: 24,
                       decoration: const BoxDecoration(color: AppColors.white, shape: BoxShape.circle),
                       child: const Icon(Icons.camera_alt_rounded, color: AppColors.bg, size: 14),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
             const SizedBox(width: 16),
             const Column(
@@ -390,6 +449,11 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
                   return _MediaThumb(
                     isVideo: isVid,
                     onRemove: () => setState(() => _existingMediaUrls.removeAt(e.key)),
+                    onView: isVid
+                        ? null
+                        : () => showFullScreenImage(
+                            context,
+                            CachedNetworkImage(imageUrl: e.value, fit: BoxFit.contain)),
                     child: isVid
                         ? const Icon(Icons.videocam_rounded, color: AppColors.grey, size: 28)
                         : CachedNetworkImage(
@@ -404,6 +468,11 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
                     isVideo: item.isVideo,
                     isNew: true,
                     onRemove: () => setState(() => _newMediaItems.removeAt(e.key)),
+                    onView: item.isVideo
+                        ? null
+                        : () => showFullScreenImage(
+                            context,
+                            Image.memory(item.bytes, fit: BoxFit.contain)),
                     child: item.isVideo
                         ? const Icon(Icons.videocam_rounded, color: AppColors.grey, size: 28)
                         : Image.memory(item.bytes, fit: BoxFit.cover),
@@ -430,10 +499,22 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
 
         const SizedBox(height: 24),
 
-        _Field(label: 'FULL NAME',    ctrl: _fullName,    hint: 'Enter full name'),
-        _Field(label: 'DISPLAY NAME', ctrl: _displayName, hint: 'Store / display name'),
-        _Field(label: 'EMAIL',        ctrl: _email,       hint: 'you@example.com',   keyboardType: TextInputType.emailAddress),
-        _Field(label: 'PHONE',        ctrl: _phone,       hint: '10-digit number',   keyboardType: TextInputType.phone),
+        _Field(label: 'FULL NAME',    ctrl: _fullName,    hint: 'Enter full name',      icon: Icons.person_outline),
+        _Field(label: 'DISPLAY NAME', ctrl: _displayName, hint: 'Store / display name', icon: Icons.storefront_outlined),
+
+        // ── Email (OTP verified) ──────────────────────────────────────────
+        _EmailVerificationField(
+          emailCtrl:    _email,
+          otpCtrl:      _emailOtp,
+          emailVerified: widget.data['emailVerified'] as bool? ?? false,
+          otpSent:      _emailOtpSent,
+          loading:      ref.watch(settingsPod).savingSection == 'email',
+          onSendOtp:    _requestEmailOtp,
+          onVerify:     _verifyEmailOtp,
+          onCancel:     _cancelEmailOtp,
+        ),
+
+        _Field(label: 'PHONE', ctrl: _phone, hint: '10-digit number', icon: Icons.phone_outlined, keyboardType: TextInputType.phone, enabled: false),
 
         const SizedBox(height: 8),
 
@@ -443,17 +524,125 @@ class _PersonalTabState extends ConsumerState<_PersonalTab> {
   }
 }
 
+// ─── Email verification field (OTP flow) ───────────────────────────────────
+
+class _EmailVerificationField extends StatelessWidget {
+  final TextEditingController emailCtrl;
+  final TextEditingController otpCtrl;
+  final bool emailVerified;
+  final bool otpSent;
+  final bool loading;
+  final VoidCallback onSendOtp;
+  final VoidCallback onVerify;
+  final VoidCallback onCancel;
+
+  const _EmailVerificationField({
+    required this.emailCtrl,
+    required this.otpCtrl,
+    required this.emailVerified,
+    required this.otpSent,
+    required this.loading,
+    required this.onSendOtp,
+    required this.onVerify,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _Field(
+            label: 'EMAIL',
+            ctrl:  emailCtrl,
+            hint:  'you@example.com',
+            icon:  Icons.mail_outline,
+            keyboardType: TextInputType.emailAddress,
+            enabled: !otpSent,
+            suffix: emailVerified
+                ? const Icon(Icons.check_circle_outline, color: AppColors.success, size: 18)
+                : null,
+          ),
+          if (emailVerified) ...[
+            const Padding(
+              padding: EdgeInsets.only(top: 4, bottom: 12),
+              child: Text('Verified', style: TextStyle(color: AppColors.success, fontSize: 12)),
+            ),
+          ],
+
+          if (!otpSent)
+            SizedBox(
+              width: double.infinity,
+              child: GestureDetector(
+                onTap: loading ? null : onSendOtp,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: loading ? AppColors.border : AppColors.white, width: 1.5),
+                  ),
+                  child: Center(
+                    child: loading
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: AppColors.grey, strokeWidth: 2))
+                        : const Text('Send Verification OTP',
+                            style: TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ),
+            )
+          else ...[
+            const SizedBox(height: 4),
+            _Field(label: 'VERIFICATION CODE', ctrl: otpCtrl, hint: '6-digit OTP', icon: Icons.lock_outline,
+                keyboardType: TextInputType.number, maxLength: 6),
+            Row(
+              children: [
+                Expanded(child: _SaveButton(label: 'Verify & Update', onTap: onVerify, isSaving: loading)),
+                const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: loading ? null : onCancel,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: const Text('Cancel', style: TextStyle(color: AppColors.grey, fontSize: 14)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text('OTP sent to ${emailCtrl.text}',
+                  style: const TextStyle(color: AppColors.greyDark, fontSize: 11)),
+            ),
+          ],
+
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
 class _MediaThumb extends StatelessWidget {
   final Widget child;
   final bool isVideo;
   final bool isNew;
   final VoidCallback onRemove;
+  final VoidCallback? onView;
 
   const _MediaThumb({
     required this.child,
     required this.onRemove,
     this.isVideo = false,
     this.isNew   = false,
+    this.onView,
   });
 
   @override
@@ -463,12 +652,15 @@ class _MediaThumb extends StatelessWidget {
       margin: const EdgeInsets.only(right: 8),
       child: Stack(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              width: 80, height: 80,
-              color: AppColors.surface2,
-              child: child,
+          GestureDetector(
+            onTap: onView,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: 80, height: 80,
+                color: AppColors.surface2,
+                child: child,
+              ),
             ),
           ),
           if (isVideo)
@@ -505,6 +697,442 @@ class _MediaThumb extends StatelessWidget {
                 ),
                 child: const Icon(Icons.close_rounded, color: AppColors.white, size: 12),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── KYC / Documents Tab ────────────────────────────────────────────────────
+
+class _KycTab extends ConsumerStatefulWidget {
+  final Map<String, dynamic> data;
+  const _KycTab({required this.data});
+
+  @override
+  ConsumerState<_KycTab> createState() => _KycTabState();
+}
+
+class _KycTabState extends ConsumerState<_KycTab> {
+  final _aadhaarNumber = TextEditingController();
+  final _panNumber     = TextEditingController();
+  final _gstNumber     = TextEditingController();
+
+  Uint8List? _aadhaarFrontBytes;
+  Uint8List? _aadhaarBackBytes;
+  Uint8List? _panDocBytes;
+  Uint8List? _gstDocBytes;
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.data.isNotEmpty) _populate();
+  }
+
+  @override
+  void didUpdateWidget(_KycTab old) {
+    super.didUpdateWidget(old);
+    if (!_initialized && widget.data.isNotEmpty) _populate();
+  }
+
+  void _populate() {
+    _initialized = true;
+    _gstNumber.text = widget.data['gstNumber'] as String? ?? '';
+
+    // The backend never returns the raw Aadhaar/PAN number — only a masked
+    // last-4 form. Once a section is locked for review there's no editable
+    // value to restore, so show the masked number instead of a blank field.
+    final status = widget.data['status'] as String?;
+    final locked = status == 'PENDING' || status == 'APPROVED';
+    if (locked) {
+      final aadhaarLast4 = widget.data['aadhaarLast4'] as String?;
+      final panLast4     = widget.data['panLast4']     as String?;
+      if (aadhaarLast4 != null) _aadhaarNumber.text = '•••• •••• ${_KycStatusBanner._last4(aadhaarLast4)}';
+      if (panLast4 != null)     _panNumber.text     = '•••••${_KycStatusBanner._last4(panLast4)}';
+    }
+  }
+
+  @override
+  void dispose() {
+    _aadhaarNumber.dispose();
+    _panNumber.dispose();
+    _gstNumber.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDoc(void Function(Uint8List bytes) onPicked) async {
+    HapticUtils.light();
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+      withData: true,
+    );
+    final bytes = result?.files.single.bytes;
+    if (bytes != null) setState(() => onPicked(bytes));
+  }
+
+  Future<void> _saveAadhaar() async {
+    if (_aadhaarNumber.text.trim().length != 12) {
+      AppToast.show(context, message: 'Enter a valid 12-digit Aadhaar number', type: ToastType.error);
+      return;
+    }
+    if (_aadhaarFrontBytes == null || _aadhaarBackBytes == null) {
+      AppToast.show(context, message: 'Upload both sides of your Aadhaar card', type: ToastType.error);
+      return;
+    }
+    HapticUtils.medium();
+    final ok = await ref.read(settingsPod.notifier).submitAadhaarDocuments(
+      aadhaarNumber: _aadhaarNumber.text.trim(),
+      frontBytes:    _aadhaarFrontBytes!,
+      backBytes:     _aadhaarBackBytes!,
+    );
+    if (ok && mounted) {
+      setState(() { _aadhaarFrontBytes = null; _aadhaarBackBytes = null; });
+    }
+  }
+
+  Future<void> _savePan() async {
+    if (_panNumber.text.trim().length != 10) {
+      AppToast.show(context, message: 'Enter a valid 10-character PAN number', type: ToastType.error);
+      return;
+    }
+    if (_panDocBytes == null) {
+      AppToast.show(context, message: 'Upload your PAN card document', type: ToastType.error);
+      return;
+    }
+    HapticUtils.medium();
+    final ok = await ref.read(settingsPod.notifier).submitPanDocument(
+      panNumber: _panNumber.text.trim().toUpperCase(),
+      docBytes:  _panDocBytes!,
+    );
+    if (ok && mounted) setState(() => _panDocBytes = null);
+  }
+
+  Future<void> _saveGst() async {
+    if (_gstNumber.text.trim().length != 15) {
+      AppToast.show(context, message: 'Enter a valid 15-character GSTIN', type: ToastType.error);
+      return;
+    }
+    if (_gstDocBytes == null) {
+      AppToast.show(context, message: 'Upload your GST document', type: ToastType.error);
+      return;
+    }
+    HapticUtils.medium();
+    final ok = await ref.read(settingsPod.notifier).submitGstDocument(
+      gstNumber: _gstNumber.text.trim().toUpperCase(),
+      docBytes:  _gstDocBytes!,
+    );
+    if (ok && mounted) setState(() => _gstDocBytes = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final savingSection = ref.watch(settingsPod).savingSection;
+    final status = widget.data['status'] as String?;
+    // Aadhaar/PAN lock once the pair is complete and queued for review;
+    // GST stays editable (it's optional and doesn't gate review) until approved.
+    final mandatoryLocked = status == 'PENDING' || status == 'APPROVED';
+    final gstLocked        = status == 'APPROVED';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _KycStatusBanner(
+          status: status,
+          rejectionReason: widget.data['rejectionReason'] as String?,
+          aadhaarLast4: widget.data['aadhaarLast4'] as String?,
+          panLast4: widget.data['panLast4'] as String?,
+        ),
+        const SizedBox(height: 20),
+
+        const Text('AADHAAR CARD',
+            style: TextStyle(color: AppColors.grey, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+        const SizedBox(height: 4),
+        const Text('Mandatory — required for shop verification',
+            style: TextStyle(color: AppColors.greyDark, fontSize: 11)),
+        const SizedBox(height: 12),
+        _Field(
+          label: 'AADHAAR NUMBER', ctrl: _aadhaarNumber, hint: '12-digit number',
+          icon: Icons.badge_outlined, keyboardType: TextInputType.number,
+          maxLength: 12, enabled: !mandatoryLocked,
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: _DocUploadBox(
+                label: 'Front side',
+                bytes: _aadhaarFrontBytes,
+                existingUrl: widget.data['aadhaarFrontUrl'] as String?,
+                enabled: !mandatoryLocked,
+                onTap: () => _pickDoc((b) => _aadhaarFrontBytes = b),
+                onRemove: () => setState(() => _aadhaarFrontBytes = null),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _DocUploadBox(
+                label: 'Back side',
+                bytes: _aadhaarBackBytes,
+                existingUrl: widget.data['aadhaarBackUrl'] as String?,
+                enabled: !mandatoryLocked,
+                onTap: () => _pickDoc((b) => _aadhaarBackBytes = b),
+                onRemove: () => setState(() => _aadhaarBackBytes = null),
+              ),
+            ),
+          ],
+        ),
+        if (!mandatoryLocked) ...[
+          const SizedBox(height: 8),
+          _SaveButton(
+            label: 'Save Aadhaar Details',
+            onTap: _saveAadhaar,
+            isSaving: savingSection == 'kyc-aadhaar',
+          ),
+        ],
+
+        const SizedBox(height: 24),
+        const Text('PAN CARD',
+            style: TextStyle(color: AppColors.grey, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+        const SizedBox(height: 4),
+        const Text('Mandatory — required for shop verification',
+            style: TextStyle(color: AppColors.greyDark, fontSize: 11)),
+        const SizedBox(height: 12),
+        _Field(
+          label: 'PAN NUMBER', ctrl: _panNumber, hint: 'ABCDE1234F',
+          icon: Icons.credit_card_outlined, maxLength: 10, enabled: !mandatoryLocked,
+        ),
+        _DocUploadBox(
+          label: 'PAN document',
+          bytes: _panDocBytes,
+          existingUrl: widget.data['panDocumentUrl'] as String?,
+          enabled: !mandatoryLocked,
+          onTap: () => _pickDoc((b) => _panDocBytes = b),
+          onRemove: () => setState(() => _panDocBytes = null),
+        ),
+        if (!mandatoryLocked) ...[
+          const SizedBox(height: 8),
+          _SaveButton(
+            label: 'Save PAN Details',
+            onTap: _savePan,
+            isSaving: savingSection == 'kyc-pan',
+          ),
+        ],
+
+        const SizedBox(height: 24),
+        const Text('GST DETAILS',
+            style: TextStyle(color: AppColors.grey, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+        const SizedBox(height: 4),
+        const Text('Optional — add this any time', style: TextStyle(color: AppColors.greyDark, fontSize: 11)),
+        const SizedBox(height: 12),
+        _Field(
+          label: 'GST NUMBER', ctrl: _gstNumber, hint: '15-character GSTIN',
+          icon: Icons.receipt_long_outlined, maxLength: 15, enabled: !gstLocked,
+        ),
+        _DocUploadBox(
+          label: 'GST document',
+          bytes: _gstDocBytes,
+          existingUrl: widget.data['gstDocumentUrl'] as String?,
+          enabled: !gstLocked,
+          onTap: () => _pickDoc((b) => _gstDocBytes = b),
+          onRemove: () => setState(() => _gstDocBytes = null),
+        ),
+        if (!gstLocked) ...[
+          const SizedBox(height: 8),
+          _SaveButton(
+            label: 'Save GST Details',
+            onTap: _saveGst,
+            isSaving: savingSection == 'kyc-gst',
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _KycStatusBanner extends StatelessWidget {
+  final String? status;
+  final String? rejectionReason;
+  final String? aadhaarLast4;
+  final String? panLast4;
+
+  const _KycStatusBanner({
+    required this.status,
+    required this.rejectionReason,
+    required this.aadhaarLast4,
+    required this.panLast4,
+  });
+
+  // Backend sends a fully masked string (e.g. "********9876") — strip the
+  // stars so only the actual last 4 characters are shown here.
+  static String _last4(String masked) => masked.replaceAll('*', '');
+
+  @override
+  Widget build(BuildContext context) {
+    late final Color color;
+    late final IconData icon;
+    late final String title;
+    late final String subtitle;
+
+    switch (status) {
+      case 'PENDING':
+        color = AppColors.warning;
+        icon = Icons.hourglass_top_rounded;
+        title = 'Under review';
+        subtitle = 'Our team is verifying your documents. This usually takes 1-2 business days.';
+        break;
+      case 'APPROVED':
+        color = AppColors.success;
+        icon = Icons.verified_rounded;
+        title = 'Verified';
+        subtitle = 'Your documents are approved and your shop is authorized.';
+        break;
+      case 'REJECTED':
+        color = AppColors.error;
+        icon = Icons.error_outline_rounded;
+        title = 'Rejected — please resubmit';
+        subtitle = rejectionReason?.isNotEmpty == true
+            ? rejectionReason!
+            : 'Your submission was rejected. Please check your details and resubmit.';
+        break;
+      case 'IN_PROGRESS':
+        color = AppColors.info;
+        icon = Icons.pending_actions_rounded;
+        title = 'In progress';
+        subtitle = 'Add your remaining mandatory document(s) to submit for review.';
+        break;
+      default:
+        color = AppColors.info;
+        icon = Icons.info_outline_rounded;
+        title = 'Verification required';
+        subtitle = 'Add your Aadhaar and PAN — one at a time — to get your shop verified. GST is optional.';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 3),
+                Text(subtitle, style: const TextStyle(color: AppColors.grey, fontSize: 12)),
+                if (status != null && (aadhaarLast4 != null || panLast4 != null)) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    [
+                      if (aadhaarLast4 != null) 'Aadhaar ••${_last4(aadhaarLast4!)}',
+                      if (panLast4 != null) 'PAN ••${_last4(panLast4!)}',
+                    ].join('  ·  '),
+                    style: const TextStyle(color: AppColors.greyDark, fontSize: 11),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DocUploadBox extends StatelessWidget {
+  final String label;
+  final Uint8List? bytes;
+  final String? existingUrl;
+  final bool enabled;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  const _DocUploadBox({
+    required this.label,
+    required this.bytes,
+    required this.existingUrl,
+    required this.enabled,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasNew      = bytes != null;
+    final hasExisting = !hasNew && (existingUrl?.isNotEmpty ?? false);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: enabled ? onTap : null,
+            child: Container(
+              width: double.infinity,
+              height: 90,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: hasNew || hasExisting
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: hasNew
+                              ? Image.memory(bytes!, fit: BoxFit.cover)
+                              : CachedNetworkImage(
+                                  imageUrl: existingUrl!, fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) => const Icon(Icons.description_outlined, color: AppColors.grey),
+                                ),
+                        ),
+                        if (hasNew)
+                          Positioned(
+                            top: 4, left: 4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.info.withOpacity(0.85),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text('NEW', style: TextStyle(color: AppColors.white, fontSize: 8, fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                        if (enabled && hasNew)
+                          Positioned(
+                            top: 4, right: 4,
+                            child: GestureDetector(
+                              onTap: onRemove,
+                              child: Container(
+                                width: 20, height: 20,
+                                decoration: BoxDecoration(color: AppColors.error.withOpacity(0.85), shape: BoxShape.circle),
+                                child: const Icon(Icons.close_rounded, color: AppColors.white, size: 12),
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  : Center(
+                      child: Icon(
+                        enabled ? Icons.add_photo_alternate_outlined : Icons.lock_outline_rounded,
+                        color: AppColors.greyDark, size: 24,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -647,7 +1275,7 @@ class _BusinessTabState extends ConsumerState<_BusinessTab> {
         const SizedBox(height: 24),
 
         // ── GST ───────────────────────────────────────────────────────────
-        _Field(label: 'GST NUMBER', ctrl: _gst, hint: 'Optional'),
+        _Field(label: 'GST NUMBER', ctrl: _gst, hint: 'Optional', icon: Icons.receipt_long_outlined),
 
         // ── Business Category ──────────────────────────────────────────────
         const Text('BUSINESS CATEGORY',
@@ -775,61 +1403,124 @@ class _BankTabState extends ConsumerState<_BankTab> {
 
   @override
   Widget build(BuildContext context) {
-    final saving   = ref.watch(settingsPod).savingSection == 'bank';
-    final verified = widget.data['verified'] as bool? ?? false;
+    final saving        = ref.watch(settingsPod).savingSection == 'bank';
+    final verified       = widget.data['verified'] as bool? ?? false;
+    final maskedOnFile   = widget.data['accountNumber'] as String?;
+    final hasExisting    = maskedOnFile != null && maskedOnFile.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (verified)
+        if (hasExisting)
+          _BankStatusBanner(verified: verified)
+        else
           Container(
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppColors.success.withOpacity(0.08),
+              color: AppColors.warning.withOpacity(0.08),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.success.withOpacity(0.3)),
+              border: Border.all(color: AppColors.warning.withOpacity(0.3)),
             ),
             child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.verified_rounded, color: AppColors.success, size: 18),
+                Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 18),
                 SizedBox(width: 10),
-                Text('Bank account verified — payouts will go to this account',
-                    style: TextStyle(color: AppColors.success, fontSize: 13)),
+                Expanded(
+                  child: Text(
+                    'Bank details are encrypted and require verification before payouts start.',
+                    style: TextStyle(color: AppColors.warning, fontSize: 12, height: 1.5),
+                  ),
+                ),
               ],
             ),
           ),
 
-        Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.warning.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.warning.withOpacity(0.3)),
-          ),
-          child: const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 18),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Changing bank details will require re-verification and may delay payouts by 2–3 business days.',
-                  style: TextStyle(color: AppColors.warning, fontSize: 12, height: 1.5),
-                ),
-              ),
-            ],
-          ),
-        ),
+        _Field(label: 'ACCOUNT HOLDER NAME', ctrl: _holder,   hint: 'As on bank records',        icon: Icons.person_outline),
 
-        _Field(label: 'ACCOUNT HOLDER NAME', ctrl: _holder,   hint: 'As on bank records'),
-        _Field(label: 'ACCOUNT NUMBER',      ctrl: _account,  hint: 'Enter account number',  obscure: true),
-        _Field(label: 'IFSC CODE',           ctrl: _ifsc,     hint: 'e.g. SBIN0001234'),
-        _Field(label: 'BANK NAME',           ctrl: _bankName, hint: 'e.g. State Bank of India'),
+        const Text('ACCOUNT NUMBER',
+            style: TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 8),
+        if (hasExisting) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.lock_outline_rounded, color: AppColors.grey, size: 16),
+                const SizedBox(width: 10),
+                Text(maskedOnFile, style: const TextStyle(color: AppColors.white, fontSize: 15, letterSpacing: 1)),
+                const Spacer(),
+                const Text('on file', style: TextStyle(color: AppColors.greyDark, fontSize: 11)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Padding(
+            padding: EdgeInsets.only(left: 4, bottom: 12),
+            child: Text(
+              'To change it, enter a new account number below.',
+              style: TextStyle(color: AppColors.greyDark, fontSize: 11),
+            ),
+          ),
+        ],
+        _Field(ctrl: _account, hint: hasExisting ? 'Enter a new account number' : 'Enter account number',
+            label: hasExisting ? 'NEW ACCOUNT NUMBER' : 'ACCOUNT NUMBER', icon: Icons.tag_outlined,
+            keyboardType: TextInputType.number),
+
+        _Field(label: 'IFSC CODE',           ctrl: _ifsc,     hint: 'e.g. SBIN0001234',          icon: Icons.code_rounded),
+        _Field(label: 'BANK NAME',           ctrl: _bankName, hint: 'e.g. State Bank of India',  icon: Icons.account_balance_outlined),
         const SizedBox(height: 8),
         _SaveButton(label: 'Update Bank Details', onTap: _save, isSaving: saving),
       ].animate(interval: 40.ms).fadeIn().slideY(begin: 0.05, end: 0),
+    );
+  }
+}
+
+class _BankStatusBanner extends StatelessWidget {
+  final bool verified;
+  const _BankStatusBanner({required this.verified});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = verified ? AppColors.success : AppColors.warning;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(verified ? Icons.verified_rounded : Icons.hourglass_top_rounded, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(verified ? 'Verified' : 'Verification pending',
+                    style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 3),
+                Text(
+                  verified
+                      ? 'Payouts will go to this account.'
+                      : 'Our team is verifying this account. Changing details restarts verification and may delay payouts by 2–3 business days.',
+                  style: const TextStyle(color: AppColors.grey, fontSize: 12, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -946,14 +1637,20 @@ class _Field extends StatelessWidget {
   final String label;
   final TextEditingController ctrl;
   final String hint;
+  final IconData icon;
   final TextInputType keyboardType;
-  final bool obscure;
+  final bool enabled;
+  final Widget? suffix;
+  final int? maxLength;
   const _Field({
     required this.label,
     required this.ctrl,
     required this.hint,
+    this.icon         = Icons.edit_outlined,
     this.keyboardType = TextInputType.text,
-    this.obscure      = false,
+    this.enabled      = true,
+    this.suffix,
+    this.maxLength,
   });
 
   @override
@@ -963,22 +1660,27 @@ class _Field extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.4)),
+          const SizedBox(height: 8),
           TextField(
             controller:   ctrl,
             keyboardType: keyboardType,
-            obscureText:  obscure,
-            maxLines:     obscure ? 1 : 1,
-            style: const TextStyle(color: AppColors.white, fontSize: 14),
+            enabled:      enabled,
+            maxLength:    maxLength,
+            style: const TextStyle(color: AppColors.white, fontSize: 15),
+            cursorColor: AppColors.white,
             decoration: InputDecoration(
               hintText:          hint,
-              hintStyle:         const TextStyle(color: AppColors.greyDark, fontSize: 14),
+              hintStyle:         const TextStyle(color: AppColors.greyDark, fontSize: 15),
+              prefixIcon:        Icon(icon, color: AppColors.grey, size: 18),
+              suffixIcon:        suffix,
               filled:            true,
               fillColor:         AppColors.surface,
+              counterText:       maxLength != null ? '' : null,
               contentPadding:    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               border:            OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
               enabledBorder:     OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+              disabledBorder:    OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
               focusedBorder:     OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.white, width: 1.5)),
             ),
           ),
@@ -997,22 +1699,19 @@ class _SaveButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: GestureDetector(
-        onTap: isSaving ? null : onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            color: isSaving ? AppColors.surface2 : AppColors.white,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Center(
-            child: isSaving
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: AppColors.grey, strokeWidth: 2))
-                : Text(label, style: const TextStyle(color: AppColors.bg, fontSize: 14, fontWeight: FontWeight.w700)),
-          ),
+    return GestureDetector(
+      onTap: isSaving ? null : onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: isSaving ? AppColors.surface2 : AppColors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: isSaving
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: AppColors.grey, strokeWidth: 2))
+              : Text(label, style: const TextStyle(color: AppColors.bg, fontSize: 14, fontWeight: FontWeight.w700)),
         ),
       ),
     );

@@ -137,7 +137,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
+              // Error state — don't show mock/zero stats when the fetch failed
+              if (!state.isLoading && state.error != null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    child: _DashboardErrorState(onRetry: _refresh),
+                  ).animate().fadeIn(),
+                ),
+
               // Stat cards
+              if (!(!state.isLoading && state.error != null))
               SliverToBoxAdapter(
                 child: state.isLoading
                     ? SingleChildScrollView(
@@ -197,30 +207,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
               // Sales chart
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Sales Overview',
-                        style: TextStyle(
-                          color: AppColors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+              if (state.isLoading || state.error == null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Sales Overview',
+                          style: TextStyle(
+                            color: AppColors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      state.isLoading
-                          ? const AppShimmer(child: ShimmerBox(height: 200))
-                          : MiniSalesChart(data: state.salesChart),
-                    ],
-                  ).animate().fadeIn(delay: 100.ms),
+                        const SizedBox(height: 16),
+                        state.isLoading
+                            ? const AppShimmer(child: ShimmerBox(height: 200))
+                            : MiniSalesChart(data: state.salesChart),
+                      ],
+                    ).animate().fadeIn(delay: 100.ms),
+                  ),
                 ),
-              ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 28)),
+              if (state.isLoading || state.error == null) const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
               // Earnings card
               SliverToBoxAdapter(
@@ -259,53 +270,55 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               if (state.alerts.isNotEmpty) const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
               // Recent orders
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      const Text(
-                        'Recent Orders',
-                        style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700),
-                      ),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () {
-                          HapticUtils.light();
-                          ref.read(navIndexPod.notifier).state = 1; // Orders tab
-                        },
-                        child: const Text(
-                          'See all',
-                          style: TextStyle(color: AppColors.grey, fontSize: 13),
+              if (state.isLoading || state.error == null) ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Recent Orders',
+                          style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700),
                         ),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: () {
+                            HapticUtils.light();
+                            ref.read(navIndexPod.notifier).state = 1; // Orders tab
+                          },
+                          child: const Text(
+                            'See all',
+                            style: TextStyle(color: AppColors.grey, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+
+                if (state.isLoading)
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (_, __) => const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                        child: OrderItemShimmer(),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SliverToBoxAdapter(child: SizedBox(height: 12)),
-
-              if (state.isLoading)
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (_, __) => const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                      child: OrderItemShimmer(),
+                      childCount: 4,
                     ),
-                    childCount: 4,
-                  ),
-                )
-              else
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) => Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                      child: OrderListTile(order: state.recentOrders[i] as Map),
+                  )
+                else
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (_, i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                        child: OrderListTile(order: state.recentOrders[i] as Map),
+                      ),
+                      childCount: state.recentOrders.length,
                     ),
-                    childCount: state.recentOrders.length,
                   ),
-                ),
+              ],
 
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
             ],
@@ -326,6 +339,56 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (value == null) return '₹0';
     final amount = (value as num).toDouble();
     return '₹${NumberFormat.compact().format(amount)}';
+  }
+}
+
+class _DashboardErrorState extends StatelessWidget {
+  final Future<void> Function() onRetry;
+  const _DashboardErrorState({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: AppColors.grey, size: 32),
+          const SizedBox(height: 10),
+          const Text(
+            'Couldn\'t load dashboard data',
+            style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w700),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Check your connection and try again',
+            style: TextStyle(color: AppColors.grey, fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 14),
+          GestureDetector(
+            onTap: () { HapticUtils.light(); onRetry(); },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'Retry',
+                style: TextStyle(color: AppColors.bg, fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

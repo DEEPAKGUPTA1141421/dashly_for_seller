@@ -286,9 +286,9 @@ class _TagsBrandStepState extends ConsumerState<TagsBrandStep> {
 
           AppButton(
             isLoading: state.isCreating,
-            label:     'Continue to Review',
+            label:     state.isEditMode ? 'Update' : 'Continue to Review',
             onTap:     _next,
-            icon:      Icons.arrow_forward_rounded,
+            icon:      state.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
           ).animate().fadeIn(delay: 200.ms),
         ],
       ),

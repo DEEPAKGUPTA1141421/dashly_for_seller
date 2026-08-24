@@ -1,7 +1,14 @@
 class ApiEndpoints {
   // ── Service bases ──────────────────────────────────────────────────────────
-  static const String productServiceBase  = 'http://localhost:8081';
-  static const String orderServiceBase    = 'https://orderpaymentnotificationservice.onrender.com ';
+  // PRODUCT_SERVICE_BASE can be overridden at build/run time, e.g. to test
+  // against a LAN IP from a phone on the same Wi-Fi:
+  //   flutter run -d chrome --web-hostname=0.0.0.0 --web-port=8000 \
+  //     --dart-define=PRODUCT_SERVICE_BASE=http://<your-lan-ip>:8081
+  static const String productServiceBase = String.fromEnvironment(
+    'PRODUCT_SERVICE_BASE',
+    defaultValue: 'http://localhost:8081',
+  );
+  static const String orderServiceBase    = 'https://orderpaymentnotificationservice.onrender.com';
   static const String deliveryServiceBase = 'https://deliveryinventoryservice.onrender.com';
 
   // ── Auth  (ProductClientService · 8081) ───────────────────────────────────
@@ -33,9 +40,11 @@ class ApiEndpoints {
   static const String sellerProductUpdateAddress   = '/api/v1/seller/product/update-address';
 
   // ── Categories & Brands  (ProductClientService · 8081) ───────────────────
-  // Category tree (hierarchical)
+  // Category tree (hierarchical) — full global tree, used in the add-product flow
   static const String categoryTree       = '/api/v1/product/category';
-  static const String sellerCategories   = '/api/v1/product/category';
+  // Distinct categories the seller actually has LIVE products in — used for the
+  // seller's product-list filter (not the full global tree)
+  static const String sellerCategories   = '/api/v1/seller/product/my-categories';
   // Level-0 categories only (used in Settings → business category picker)
   static const String levelZeroCategories = '/api/v1/product/categorylevelwise';
   // GET /api/v1/seller/product/getall-category-attribute/{categoryId}
@@ -52,10 +61,18 @@ class ApiEndpoints {
   static const String aadharVerifyOtp    = '/api/v1/seller/product/kyc/aadhar/verify-otp';
   static const String aadharUploadDoc    = '/api/v1/seller/product/kyc/aadhar/upload-document';
   static const String aadharStatus       = '/api/v1/seller/product/kyc/aadhar/status';
+  // GET — overall Aadhaar+PAN+GST document review status
+  static const String kycDocuments       = '/api/v1/seller/product/kyc/documents';
+  // POST (multipart) — each document type is submitted independently
+  static const String kycDocumentsAadhaar = '/api/v1/seller/product/kyc/documents/aadhaar';
+  static const String kycDocumentsPan     = '/api/v1/seller/product/kyc/documents/pan';
+  static const String kycDocumentsGst     = '/api/v1/seller/product/kyc/documents/gst';
 
   // ── Seller Settings  (ProductClientService · 8081) ───────────────────────
   static const String settingsAll           = '/api/v1/seller/settings/all';
   static const String settingsPersonal      = '/api/v1/seller/settings/personal';
+  static const String settingsEmailRequest  = '/api/v1/seller/settings/personal/email/request';
+  static const String settingsEmailVerify   = '/api/v1/seller/settings/personal/email/verify';
   static const String settingsBusiness      = '/api/v1/seller/settings/business';
   static const String settingsBank          = '/api/v1/seller/settings/bank';
   static const String settingsNotifications = '/api/v1/seller/settings/notifications';
@@ -96,4 +113,8 @@ class ApiEndpoints {
   // ── Device Tokens  (OrderPaymentNotificationService · 8082) ──────────────
   // POST  body: { token, platform }
   static const String deviceTokens = '/api/v1/users/devices';
+
+  // ── Generic config  (ProductClientService · 8081) ────────────────────────
+  // GET /api/v1/config/{key}  →  data is the raw JSON value stored for that key
+  static const String config = '/api/v1/config';
 }

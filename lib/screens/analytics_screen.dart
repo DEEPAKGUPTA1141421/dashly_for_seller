@@ -2,12 +2,25 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/theme/responsive.dart';
 import '../core/widgets/app_shimmer.dart';
+import '../models/balance_stat.dart';
 import '../providers/analytics_provider.dart';
 import '../providers/reviews_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
+import '../widgets/analytics/balance_stat_card.dart';
+import '../widgets/analytics/product_activity_table.dart';
+import '../widgets/analytics/product_views_card.dart';
+import '../widgets/analytics/top_cities_card.dart';
 import 'reviews_screen.dart';
+import 'share_product_sheet.dart';
+
+/// Shared period options for every date-range selector on this screen —
+/// 3650 is the "All time" sentinel the backend treats as its effective ceiling.
+const List<int> kPeriodOptions = [7, 30, 90, 3650];
+
+String periodLabel(int days) => days >= 3650 ? 'All time' : '${days}d';
 
 class AnalyticsScreen extends ConsumerStatefulWidget {
   const AnalyticsScreen({super.key});
@@ -35,6 +48,8 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(analyticsPod);
+    final hPad  = Responsive.horizontalPadding(context);
+    final twoCol = Responsive.isDesktop(context);
 
     // Build chart bars from dailyChart data
     final chart  = state.dailyChart;
@@ -44,25 +59,19 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
         .toDouble()
         .clamp(1.0, double.infinity);
 
-    final totalOrdersStr  = '${state.stats['totalOrders'] ?? 0}';
-    final pendingStr      = '${state.stats['pendingOrders'] ?? 0}';
-    final totalRevStr     = '₹${state.stats['totalRevenueRupees'] ?? '0.00'}';
-    final ordersChange    = (state.stats['ordersChange']  as num?)?.toDouble() ?? 0;
-    final revenueChange   = (state.stats['revenueChange'] as num?)?.toDouble() ?? 0;
-
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _refresh,
-          color: AppColors.white,
+          color: AppColors.accent,
           backgroundColor: AppColors.surface,
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                  padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 24),
                   child: const Text(
                     'Analytics',
                     style: TextStyle(color: AppColors.white, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -0.3),
@@ -76,8 +85,8 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                   height: 36,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    children: [7, 30, 90].map((d) {
+                    padding: EdgeInsets.symmetric(horizontal: hPad),
+                    children: kPeriodOptions.map((d) {
                       final selected = state.selectedDays == d;
                       return GestureDetector(
                         onTap: () {
@@ -89,14 +98,14 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                           margin: const EdgeInsets.only(right: 8),
                           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
                           decoration: BoxDecoration(
-                            color: selected ? AppColors.white : AppColors.surface,
+                            color: selected ? AppColors.accent : AppColors.surface,
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: selected ? AppColors.white : AppColors.border),
+                            border: Border.all(color: selected ? AppColors.accent : AppColors.border),
                           ),
                           child: Text(
-                            '${d}d',
+                            periodLabel(d),
                             style: TextStyle(
-                              color: selected ? AppColors.bg : AppColors.grey,
+                              color: selected ? Colors.white : AppColors.grey,
                               fontSize: 12,
                               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                             ),
@@ -110,63 +119,40 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 20)),
 
+              // Overview — customers, income, recent customers, send message
+              if (!state.isLoading && state.error == null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 24),
+                    child: _OverviewCard(state: state).animate().fadeIn(delay: 90.ms),
+                  ),
+                ),
+
               // Error state — don't show mock/zero stats when the fetch failed
               if (!state.isLoading && state.error != null)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 24),
                     child: _AnalyticsErrorState(onRetry: _refresh),
                   ).animate().fadeIn(),
                 ),
 
-              // Summary cards
+              // Current balance + Product activity + Product views
               if (state.isLoading || state.error == null)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: EdgeInsets.symmetric(horizontal: hPad),
                     child: state.isLoading
-                        ? Row(children: [
-                            Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
-                            const SizedBox(width: 12),
-                            Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
-                            const SizedBox(width: 12),
-                            Expanded(child: AppShimmer(child: ShimmerBox(height: 88))),
-                          ])
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        ? const Column(
                             children: [
-                              Expanded(child: _SummaryCard(label: 'Total Revenue', value: totalRevStr, change: revenueChange)),
-                              const SizedBox(width: 10),
-                              Expanded(child: _SummaryCard(label: 'Total Orders',  value: totalOrdersStr, change: ordersChange)),
-                              const SizedBox(width: 10),
-                              Expanded(child: _SummaryCard(label: 'Pending',       value: pendingStr)),
+                              AppShimmer(child: ShimmerBox(height: 130)),
+                              SizedBox(height: 16),
+                              AppShimmer(child: ShimmerBox(height: 260)),
                             ],
-                          ),
-                  ).animate().fadeIn(delay: 80.ms),
-                ),
-
-              if (state.isLoading || state.error == null) const SliverToBoxAdapter(child: SizedBox(height: 28)),
-
-              // Revenue trend
-              if (state.isLoading || state.error == null)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Revenue — Last ${state.selectedDays} Days',
-                          style: const TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 16),
-                        state.isLoading
-                            ? const AppShimmer(child: ShimmerBox(height: 220))
-                            : chart.isEmpty
-                                ? _EmptyChart()
-                                : _RevenueChart(data: chart, maxPaise: maxRev),
-                      ],
-                    ).animate().fadeIn(delay: 120.ms),
+                          )
+                        : (twoCol
+                            ? _TwoColumnAnalytics(state: state, chart: chart, maxRev: maxRev)
+                            : _SingleColumnAnalytics(state: state, chart: chart, maxRev: maxRev)),
                   ),
                 ),
 
@@ -174,7 +160,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               if (!state.isLoading && (state.stats['statusBreakdown'] as Map?)?.isNotEmpty == true)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+                    padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -195,7 +181,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               if (!state.isLoading && (state.stats['statusBreakdown'] as Map?)?.isNotEmpty == true)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+                    padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -216,7 +202,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
               if (!state.isLoading && state.topProducts.isNotEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+                    padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -240,7 +226,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                   final avg   = (summary['avgRating'] as num?)?.toDouble() ?? 0.0;
                   final count = (summary['totalCount'] as num?)?.toInt() ?? 0;
                   return Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 28, 20, 0),
+                    padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
                     child: GestureDetector(
                       onTap: () {
                         HapticUtils.light();
@@ -279,12 +265,591 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
                 }),
               ),
 
+              // Top sources + Top cities
+              if (!state.isLoading)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
+                    child: twoCol
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: _TopSourcesCard(sources: state.trafficSources)),
+                              const SizedBox(width: 16),
+                              Expanded(child: TopCitiesCard(cities: state.topCities)),
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              _TopSourcesCard(sources: state.trafficSources),
+                              const SizedBox(height: 16),
+                              TopCitiesCard(cities: state.topCities),
+                            ],
+                          ),
+                  ).animate().fadeIn(delay: 220.ms),
+                ),
+
+              // Share your products
+              if (!state.isLoading && state.topProducts.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
+                    child: _ShareProductsCard(products: state.topProducts).animate().fadeIn(delay: 230.ms),
+                  ),
+                ),
+
               const SliverToBoxAdapter(child: SizedBox(height: 32)),
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+// ── Overview: customers, income, recent customers, send message ──────────────
+
+class _OverviewCard extends StatelessWidget {
+  final AnalyticsState state;
+  const _OverviewCard({required this.state});
+
+  BalanceStat? _find(String label) {
+    for (final s in state.balanceStats) {
+      if (s.label == label) return s;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final customers = _find('Customer');
+    final income     = _find('Earning');
+    final recent     = state.recentCustomers;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Overview', style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(14)),
+            child: Row(
+              children: [
+                Expanded(child: _OverviewStat(icon: Icons.person_rounded, iconColor: AppColors.warning,
+                    label: 'Customers', value: customers?.value ?? '0', changePct: customers?.changePct ?? 0)),
+                Container(width: 1, height: 40, color: AppColors.border),
+                const SizedBox(width: 12),
+                Expanded(child: _OverviewStat(icon: Icons.shopping_cart_rounded, iconColor: AppColors.info,
+                    label: 'Income', value: '₹${income?.value ?? '0'}', changePct: income?.changePct ?? 0)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text.rich(
+            TextSpan(
+              style: const TextStyle(color: AppColors.grey, fontSize: 12.5, height: 1.4),
+              children: [
+                const TextSpan(text: 'Welcome '),
+                TextSpan(text: '${customers?.value ?? '0'} customers', style: const TextStyle(color: AppColors.white, fontWeight: FontWeight.w700)),
+                const TextSpan(text: ' this month 😊'),
+              ],
+            ),
+          ),
+          if (recent.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 60,
+              child: Row(
+                children: [
+                  for (final c in recent.take(3))
+                    Padding(
+                      padding: const EdgeInsets.only(right: 14),
+                      child: _CustomerAvatar(c: c as Map),
+                    ),
+                  GestureDetector(
+                    onTap: () {
+                      HapticUtils.light();
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const ReviewsScreen()));
+                    },
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 40, height: 40,
+                          decoration: const BoxDecoration(color: AppColors.surface2, shape: BoxShape.circle),
+                          child: const Icon(Icons.arrow_forward_rounded, color: AppColors.grey, size: 18),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text('View all', style: TextStyle(color: AppColors.grey, fontSize: 10)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+}
+
+class _OverviewStat extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String value;
+  final double changePct;
+  const _OverviewStat({required this.icon, required this.iconColor, required this.label, required this.value, required this.changePct});
+
+  @override
+  Widget build(BuildContext context) {
+    final up = changePct >= 0;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 32, height: 32,
+          decoration: BoxDecoration(color: iconColor.withOpacity(0.15), shape: BoxShape.circle),
+          child: Icon(icon, color: iconColor, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: AppColors.grey, fontSize: 11)),
+              const SizedBox(height: 2),
+              Text(value, style: const TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.w800),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text('${up ? '↑' : '↓'} ${changePct.abs().toStringAsFixed(1)}%',
+                  style: TextStyle(color: up ? AppColors.success : AppColors.error, fontSize: 10, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CustomerAvatar extends StatelessWidget {
+  final Map c;
+  const _CustomerAvatar({required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final name   = (c['reviewerName'] as String?) ?? 'Customer';
+    final avatar = (c['reviewerAvatarUrl'] as String?) ?? '';
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircleAvatar(
+          radius: 20,
+          backgroundColor: AppColors.surface2,
+          backgroundImage: avatar.isNotEmpty ? NetworkImage(avatar) : null,
+          child: avatar.isEmpty ? Text(initial, style: const TextStyle(color: AppColors.white, fontWeight: FontWeight.w700)) : null,
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 56,
+          child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.grey, fontSize: 10)),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Refund requests ───────────────────────────────────────────────────────────
+
+// ── Top sources (device-equivalent) + Top cities ──────────────────────────────
+
+class _TopSourcesCard extends StatelessWidget {
+  final List<dynamic> sources;
+  const _TopSourcesCard({required this.sources});
+
+  static const _labels = {
+    'home': 'Home', 'search': 'Search', 'pdp': 'Product Page', 'push': 'Push', 'cart': 'Cart',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final total = sources.fold<num>(0, (s, e) => s + ((e as Map)['count'] as num? ?? 0));
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppColors.border)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Top sources', style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 14),
+          if (sources.isEmpty || total == 0)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: Text('No traffic data yet', style: TextStyle(color: AppColors.grey, fontSize: 12))),
+            )
+          else ...[
+            SizedBox(
+              height: 160,
+              child: PieChart(
+                PieChartData(
+                  sectionsSpace: 2,
+                  centerSpaceRadius: 45,
+                  sections: sources.asMap().entries.map((e) {
+                    final s = e.value as Map;
+                    final count = (s['count'] as num?)?.toDouble() ?? 0;
+                    final pct = total > 0 ? count / total * 100 : 0.0;
+                    return PieChartSectionData(
+                      value: count,
+                      color: AppColors.chartPalette[e.key % AppColors.chartPalette.length],
+                      title: '${pct.toStringAsFixed(0)}%',
+                      radius: 30,
+                      titleStyle: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 14,
+              runSpacing: 8,
+              children: sources.asMap().entries.map((e) {
+                final s = e.value as Map;
+                final key = (s['source'] as String?) ?? 'unknown';
+                final count = (s['count'] as num?)?.toInt() ?? 0;
+                final pct = total > 0 ? count / total * 100 : 0.0;
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(width: 8, height: 8, decoration: BoxDecoration(color: AppColors.chartPalette[e.key % AppColors.chartPalette.length], shape: BoxShape.circle)),
+                    const SizedBox(width: 6),
+                    Text('${_labels[key] ?? key}  ${pct.toStringAsFixed(1)}%', style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ],
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Share your products ───────────────────────────────────────────────────────
+
+class _ShareProductsCard extends StatefulWidget {
+  final List<dynamic> products;
+  const _ShareProductsCard({required this.products});
+
+  @override
+  State<_ShareProductsCard> createState() => _ShareProductsCardState();
+}
+
+class _ShareProductsCardState extends State<_ShareProductsCard> {
+  final Set<int> _selected = {0};
+
+  @override
+  Widget build(BuildContext context) {
+    final products = widget.products;
+    if (products.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: AppColors.border)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Share your products', style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 14),
+          Row(
+            children: products.asMap().entries.take(4).map((e) {
+              final i = e.key;
+              final p = e.value as Map;
+              final selected = _selected.contains(i);
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(right: i < products.length - 1 ? 10 : 0),
+                  child: GestureDetector(
+                    onTap: () => setState(() => selected ? _selected.remove(i) : _selected.add(i)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: AspectRatio(
+                                aspectRatio: 1,
+                                child: Container(
+                                  color: AppColors.surface2,
+                                  child: const Icon(Icons.inventory_2_outlined, color: AppColors.greyDark, size: 28),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 6, left: 6,
+                              child: Container(
+                                width: 20, height: 20,
+                                decoration: BoxDecoration(
+                                  color: selected ? AppColors.info : AppColors.surface,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: selected ? const Icon(Icons.check_rounded, color: Colors.white, size: 14) : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text((p['productName'] as String?) ?? 'Product', maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: AppColors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _selected.isEmpty ? null : () {
+                HapticUtils.light();
+                final first = products[_selected.first] as Map;
+                showShareProductSheet(context, {
+                  'name': first['productName'] ?? 'Product',
+                  'price': 0,
+                });
+              },
+              icon: const Icon(Icons.share_rounded, size: 16),
+              label: Text('Share ${_selected.length} product${_selected.length != 1 ? 's' : ''}'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.white,
+                foregroundColor: AppColors.bg,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Current balance / Product activity / Product views layout ────────────────
+
+class _CurrentBalanceRow extends ConsumerWidget {
+  final List<BalanceStat> balanceStats;
+  const _CurrentBalanceRow({required this.balanceStats});
+
+  static const _icons = [Icons.show_chart_rounded, Icons.person_rounded, Icons.podcasts_rounded];
+  static const _colors = [AppColors.success, Color(0xFFF59E0B), Color(0xFF38BDF8)];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (balanceStats.isEmpty) return const SizedBox.shrink();
+    final selectedDays = ref.watch(analyticsPod).selectedDays;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'Current balance',
+              style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const Spacer(),
+            _PeriodDropdown(
+              selectedDays: selectedDays,
+              onSelected: (d) => ref.read(analyticsPod.notifier).setDays(d),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        LayoutBuilder(builder: (context, constraints) {
+          final cards = List.generate(balanceStats.length, (i) => BalanceStatCard(
+                stat: balanceStats[i],
+                icon: _icons[i % _icons.length],
+                color: _colors[i % _colors.length],
+              ));
+          if (Responsive.isMobile(context)) {
+            return Column(
+              children: [
+                for (var i = 0; i < cards.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 12),
+                  cards[i],
+                ],
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < cards.length; i++) ...[
+                if (i > 0) const SizedBox(width: 12),
+                Expanded(child: cards[i]),
+              ],
+            ],
+          );
+        }),
+      ],
+    );
+  }
+}
+
+/// The period chip shown above "Current balance" and "Product activity" —
+/// previously static decoration (always read "All time" with a chevron but
+/// had no menu attached), so tapping it did nothing. Now a real popup menu
+/// that drives the same [analyticsPod] period used by the page's 7d/30d/90d
+/// tabs, so picking an option here actually changes what's displayed.
+class _PeriodDropdown extends StatelessWidget {
+  final int selectedDays;
+  final ValueChanged<int> onSelected;
+  const _PeriodDropdown({required this.selectedDays, required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      initialValue: selectedDays,
+      onSelected: (d) {
+        HapticUtils.light();
+        onSelected(d);
+      },
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: AppColors.border)),
+      itemBuilder: (context) => kPeriodOptions.map((d) => PopupMenuItem<int>(
+            value: d,
+            child: Text(
+              periodLabel(d),
+              style: TextStyle(
+                color: d == selectedDays ? AppColors.accent : AppColors.white,
+                fontSize: 13,
+                fontWeight: d == selectedDays ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          )).toList(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(periodLabel(selectedDays), style: const TextStyle(color: AppColors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.grey, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductActivityCard extends ConsumerWidget {
+  final AnalyticsState state;
+  const _ProductActivityCard({required this.state});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Product activity',
+                style: TextStyle(color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const Spacer(),
+              _PeriodDropdown(
+                selectedDays: state.selectedDays,
+                onSelected: (d) => ref.read(analyticsPod.notifier).setDays(d),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ProductActivityTable(
+            weeks: state.activityWeeks,
+            isLoading: state.isActivityLoading,
+            onLoadMore: () => ref.read(analyticsPod.notifier).fetchActivity(loadMore: true),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TwoColumnAnalytics extends StatelessWidget {
+  final AnalyticsState state;
+  final List<dynamic> chart;
+  final double maxRev;
+  const _TwoColumnAnalytics({required this.state, required this.chart, required this.maxRev});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 3,
+          child: Column(
+            children: [
+              _CurrentBalanceRow(balanceStats: state.balanceStats),
+              const SizedBox(height: 20),
+              _ProductActivityCard(state: state),
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          flex: 2,
+          child: ProductViewsCard(monthlyViews: state.monthlyViews),
+        ),
+      ],
+    ).animate().fadeIn(delay: 80.ms);
+  }
+}
+
+class _SingleColumnAnalytics extends StatelessWidget {
+  final AnalyticsState state;
+  final List<dynamic> chart;
+  final double maxRev;
+  const _SingleColumnAnalytics({required this.state, required this.chart, required this.maxRev});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _CurrentBalanceRow(balanceStats: state.balanceStats),
+        const SizedBox(height: 20),
+        _ProductActivityCard(state: state),
+        const SizedBox(height: 20),
+        ProductViewsCard(monthlyViews: state.monthlyViews),
+      ],
+    ).animate().fadeIn(delay: 80.ms);
   }
 }
 
@@ -325,94 +890,16 @@ class _AnalyticsErrorState extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppColors.accent,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Text(
                 'Retry',
-                style: TextStyle(color: AppColors.bg, fontSize: 13, fontWeight: FontWeight.w700),
+                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
               ),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _RevenueChart extends StatelessWidget {
-  final List<dynamic> data;
-  final double maxPaise;
-  const _RevenueChart({required this.data, required this.maxPaise});
-
-  @override
-  Widget build(BuildContext context) {
-    final chartMax = (maxPaise / 100).ceilToDouble() * 1.15; // rupees, 15% headroom
-
-    return Container(
-      height: 220,
-      padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: BarChart(
-        BarChartData(
-          alignment: BarChartAlignment.spaceAround,
-          maxY: chartMax,
-          barTouchData: BarTouchData(
-            touchTooltipData: BarTouchTooltipData(
-              getTooltipItem: (_, __, rod, ___) => BarTooltipItem(
-                '₹${rod.toY.toStringAsFixed(0)}',
-                const TextStyle(color: AppColors.white, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-          titlesData: FlTitlesData(
-            leftTitles:   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles:  const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles:    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (v, _) {
-                  final idx = v.toInt();
-                  if (idx < 0 || idx >= data.length) return const SizedBox.shrink();
-                  final day = (data[idx] as Map)['day']?.toString() ?? '';
-                  final label = day.length >= 10 ? day.substring(5) : day; // "04-20"
-                  return Text(label, style: const TextStyle(color: AppColors.greyDark, fontSize: 9));
-                },
-              ),
-            ),
-          ),
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            getDrawingHorizontalLine: (_) => const FlLine(color: AppColors.border, strokeWidth: 1),
-          ),
-          borderData: FlBorderData(show: false),
-          barGroups: data.asMap().entries.map((e) {
-            final paise   = ((e.value as Map)['revenuePaise'] as num? ?? 0).toDouble();
-            final rupees  = paise / 100;
-            return BarChartGroupData(
-              x: e.key,
-              barRods: [
-                BarChartRodData(
-                  toY: rupees,
-                  color: AppColors.white,
-                  width: 20,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-                  backDrawRodData: BackgroundBarChartRodData(
-                    show: true,
-                    toY: chartMax,
-                    color: AppColors.surface2,
-                  ),
-                ),
-              ],
-            );
-          }).toList(),
-        ),
       ),
     );
   }
@@ -571,22 +1058,6 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-class _EmptyChart extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 220,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: const Center(
-        child: Text('No order data yet', style: TextStyle(color: AppColors.grey, fontSize: 13)),
-      ),
-    );
-  }
-}
 
 // ── Top products ──────────────────────────────────────────────────────────────
 
@@ -646,61 +1117,6 @@ class _TopProducts extends StatelessWidget {
             ),
           );
         }).toList(),
-      ),
-    );
-  }
-}
-
-class _SummaryCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final double? change; // percentage vs previous period; null = no delta shown
-
-  const _SummaryCard({required this.label, required this.value, this.change});
-
-  @override
-  Widget build(BuildContext context) {
-    final showChange = change != null && change != 0;
-    final isUp       = (change ?? 0) >= 0;
-    final changeStr  = showChange ? '${isUp ? '+' : ''}${change!.toStringAsFixed(1)}%' : '';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppColors.grey, fontSize: 11),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppColors.white, fontSize: 17, fontWeight: FontWeight.w800),
-          ),
-          if (showChange) ...[
-            const SizedBox(height: 4),
-            Text(
-              changeStr,
-              maxLines: 1,
-              style: TextStyle(
-                color: isUp ? AppColors.success : AppColors.error,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ],
       ),
     );
   }

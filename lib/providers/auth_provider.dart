@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api/api_client.dart';
 import '../core/api/api_endpoints.dart';
 import '../core/errors/app_exception.dart';
+import '../core/notifications/push_notification_service.dart';
 import '../main_layout.dart';
 import '../utils/storage_service.dart';
 import 'analytics_provider.dart';
@@ -104,6 +105,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
           await StorageService.saveDisplayName(displayName);
         }
         state = state.copyWith(isLoading: false, isLoggedIn: true);
+        // Fire-and-forget — push setup must never block/fail the login flow.
+        PushNotificationService.instance.initialize(_ref.read);
         return true;
       }
       state = state.copyWith(isLoading: false, error: body['message'] ?? 'Invalid OTP');
@@ -116,6 +119,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   // POST /api/v1/auth/logout  { refreshToken }
   Future<void> logout() async {
+    await PushNotificationService.instance.deregister();
     try {
       final refreshToken = await StorageService.getRefreshToken();
       await _client.post(

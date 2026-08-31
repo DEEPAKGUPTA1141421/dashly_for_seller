@@ -6,6 +6,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../../core/widgets/app_toast.dart';
+import '../../../core/widgets/confirm_modal.dart';
 import '../../../providers/add_product_provider.dart';
 import '../../../utils/app_colors.dart';
 import '../../../utils/sound_utils.dart';
@@ -134,45 +136,94 @@ class _ImagesStepState extends ConsumerState<ImagesStep> {
     if (items.isNotEmpty) SoundUtils.add();
   }
 
+  // ── Remove helpers ────────────────────────────────────────────────────────
+
+  Future<void> _confirmRemoveCover(int index) async {
+    final confirmed = await showConfirmModal(
+      context,
+      title: 'Remove this photo?',
+      message: 'This will permanently delete it from the product. This can\'t be undone.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    SoundUtils.remove();
+    final ok = await ref.read(addProductPod.notifier).removeMedia(index);
+    if (!ok && mounted) {
+      final err = ref.read(addProductPod).error;
+      AppToast.show(context, message: err ?? 'Could not remove photo', type: ToastType.error);
+    }
+  }
+
+  Future<void> _confirmRemoveAttributeMedia(String key, int index) async {
+    final confirmed = await showConfirmModal(
+      context,
+      title: 'Remove this photo?',
+      message: 'This will permanently delete it from the product. This can\'t be undone.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+    SoundUtils.remove();
+    final ok = await ref.read(addProductPod.notifier).removeAttributeMedia(key, index);
+    if (!ok && mounted) {
+      final err = ref.read(addProductPod).error;
+      AppToast.show(context, message: err ?? 'Could not remove photo', type: ToastType.error);
+    }
+  }
+
   Future<_MediaAction?> _showSourceSheet() => showModalBottomSheet<_MediaAction>(
         context: context,
         backgroundColor: Colors.transparent,
         builder: (_) => const _SourceSheet(),
       );
 
+  // Matches AddProductNotifier.maxImageBytes / maxVideoBytes — kept as a
+  // literal here (rather than importing the provider's constant) so this
+  // pure-picking helper doesn't need to reach into provider internals; the
+  // backend independently re-validates the real size regardless.
+  static const int _maxImageBytes = 5 * 1024 * 1024;  // 5MB
+  static const int _maxVideoBytes = 50 * 1024 * 1024; // 50MB
+
   Future<List<_PickedItem>> _pickMedia(_MediaAction action, {int limit = 10}) async {
     final picker = ImagePicker();
-    final result = <_PickedItem>[];
+    final result  = <_PickedItem>[];
+    var oversized = 0;
+
+    void addIfWithinLimit(String path, String type, Uint8List bytes) {
+      final cap = type == 'video' ? _maxVideoBytes : _maxImageBytes;
+      if (bytes.length > cap) {
+        oversized++;
+        return;
+      }
+      result.add(_PickedItem(path: path, type: type, bytes: bytes));
+    }
 
     if (action == _MediaAction.gallery) {
       final files = await picker.pickMultipleMedia(imageQuality: 85, limit: limit);
       for (final f in files) {
         final isVideo = _isVideo(f);
         final bytes   = await f.readAsBytes();
-        result.add(_PickedItem(
-          path:  f.path,
-          type:  isVideo ? 'video' : 'image',
-          bytes: bytes,
-        ));
+        addIfWithinLimit(f.path, isVideo ? 'video' : 'image', bytes);
       }
     } else if (action == _MediaAction.takePhoto) {
       final f = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
-      if (f != null) {
-        result.add(_PickedItem(
-          path:  f.path,
-          type:  'image',
-          bytes: await f.readAsBytes(),
-        ));
-      }
+      if (f != null) addIfWithinLimit(f.path, 'image', await f.readAsBytes());
     } else {
       final f = await picker.pickVideo(source: ImageSource.camera);
-      if (f != null) {
-        result.add(_PickedItem(
-          path:  f.path,
-          type:  'video',
-          bytes: await f.readAsBytes(),
-        ));
-      }
+      if (f != null) addIfWithinLimit(f.path, 'video', await f.readAsBytes());
+    }
+
+    if (oversized > 0 && mounted) {
+      AppToast.show(
+        context,
+        message: oversized == 1
+            ? 'One file was too large and was skipped (max ${_maxImageBytes ~/ (1024 * 1024)}MB photos, '
+                '${_maxVideoBytes ~/ (1024 * 1024)}MB videos)'
+            : '$oversized files were too large and were skipped (max ${_maxImageBytes ~/ (1024 * 1024)}MB photos, '
+                '${_maxVideoBytes ~/ (1024 * 1024)}MB videos)',
+        type: ToastType.error,
+      );
     }
     return result;
   }
@@ -226,10 +277,7 @@ class _ImagesStepState extends ConsumerState<ImagesStep> {
                       attributeImages: s.attributeImages,
                       mediaTypes:      s.mediaTypes,
                       onPick:   (key, count) => _pickForAttribute(key, count),
-                      onRemove: (key, idx) {
-                        SoundUtils.remove();
-                        ref.read(addProductPod.notifier).removeAttributeMedia(key, idx);
-                      },
+                      onRemove: (key, idx) => _confirmRemoveAttributeMedia(key, idx),
                     ).animate(delay: Duration(milliseconds: i * 80)).fadeIn(),
                   ],
                   Container(
@@ -273,12 +321,7 @@ class _ImagesStepState extends ConsumerState<ImagesStep> {
                         path:      paths.isNotEmpty ? paths[0] : null,
                         mediaType: paths.isNotEmpty ? (s.mediaTypes[paths[0]] ?? 'image') : 'image',
                         onTap:     () => _pickGeneral(paths.length),
-                        onRemove:  paths.isNotEmpty
-                            ? () {
-                                SoundUtils.remove();
-                                ref.read(addProductPod.notifier).removeMedia(0);
-                              }
-                            : null,
+                        onRemove:  paths.isNotEmpty ? () => _confirmRemoveCover(0) : null,
                       ).animate(delay: hasAttrSections ? 200.ms : 60.ms).fadeIn(),
 
                       // Additional media row
@@ -317,10 +360,7 @@ class _ImagesStepState extends ConsumerState<ImagesStep> {
                               return _ThumbTile(
                                 path:     path,
                                 type:     type,
-                                onRemove: () {
-                                  SoundUtils.remove();
-                                  ref.read(addProductPod.notifier).removeMedia(idx);
-                                },
+                                onRemove: () => _confirmRemoveCover(idx),
                               ).animate(
                                 delay: Duration(milliseconds: i * 40),
                               ).fadeIn().slideX(begin: 0.1, end: 0);
@@ -350,23 +390,75 @@ class _ImagesStepState extends ConsumerState<ImagesStep> {
         ),
 
         // ── Continue button ────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-          decoration: const BoxDecoration(
-            color:  AppColors.surface,
-            border: Border(top: BorderSide(color: AppColors.border)),
-          ),
-          child: AppButton(
-            isLoading: s.isCreating,
-            label: s.isEditMode
-                ? 'Update Cover Photo'
-                : (paths.isNotEmpty
-                    ? 'Upload & Continue (${paths.length} file${paths.length > 1 ? 's' : ''})'
-                    : 'Skip for now'),
-            onTap: () => ref.read(addProductPod.notifier).uploadImagesAndContinue(),
-            icon:  s.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
-          ),
-        ),
+        Builder(builder: (_) {
+          final missing = ref.read(addProductPod.notifier).missingMediaRequirements();
+          return Container(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+            decoration: const BoxDecoration(
+              color:  AppColors.surface,
+              border: Border(top: BorderSide(color: AppColors.border)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (s.error != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(s.error!, style: const TextStyle(color: AppColors.error, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (missing.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Required before continuing: ${missing.join(', ')}',
+                            style: const TextStyle(color: AppColors.error, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                AppButton(
+                  isLoading: s.isCreating,
+                  label: s.isEditMode
+                      ? 'Update Cover Photo'
+                      : 'Upload & Continue (${paths.length} file${paths.length == 1 ? '' : 's'})',
+                  onTap: () => ref.read(addProductPod.notifier).uploadImagesAndContinue(),
+                  icon:  s.isEditMode ? Icons.check_rounded : Icons.arrow_forward_rounded,
+                ),
+              ],
+            ),
+          );
+        }),
       ],
     );
   }

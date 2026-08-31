@@ -44,6 +44,17 @@ class AuthInterceptor extends Interceptor {
       return handler.next(err);
     }
 
+    // A 401/403 whose final response came from a different host than this
+    // Dio's own baseUrl (e.g. a redirect that was followed out to a
+    // third-party file host) is not our session expiring — don't treat it
+    // as one, or a stray auth error on an unrelated host would log the
+    // seller out of the app.
+    final responseHost = err.response?.requestOptions.uri.host;
+    final apiHost = _dio.options.baseUrl.isNotEmpty ? Uri.parse(_dio.options.baseUrl).host : null;
+    if (responseHost != null && apiHost != null && responseHost != apiHost) {
+      return handler.next(err);
+    }
+
     // Refresh endpoint itself returned 401/403 → full logout
     if (err.requestOptions.path.contains(ApiEndpoints.refresh)) {
       await _clearAndDrain(err, handler);

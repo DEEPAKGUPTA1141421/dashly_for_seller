@@ -1,5 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import '../core/errors/app_exception.dart';
 import '../core/widgets/app_toast.dart';
 import '../core/widgets/confirm_modal.dart';
 import '../core/widgets/status_badge.dart';
@@ -28,6 +33,7 @@ class OrderDetailSheet extends ConsumerStatefulWidget {
 class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
   bool _updating = false;
   bool _loadingDetail = false;
+  bool _downloadingInvoice = false;
   Map<String, dynamic> _detail = {};
 
   String get _bookingId => (widget.order['bookingId'] ?? '').toString();
@@ -49,6 +55,31 @@ class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
     setState(() => _loadingDetail = true);
     final detail = await ref.read(ordersPod.notifier).fetchSellerOrderDetail(_bookingId);
     if (mounted) setState(() { _detail = detail; _loadingDetail = false; });
+  }
+
+  // Invoice PDFs are generated once an order is confirmed — no point showing
+  // the button for orders that never reached that state.
+  bool get _invoiceMayExist => _status != 'INITIATED' && _status != 'FAILED';
+
+  Future<void> _downloadInvoice() async {
+    if (_bookingId.isEmpty || _downloadingInvoice) return;
+    HapticUtils.light();
+    setState(() => _downloadingInvoice = true);
+    try {
+      final invoice = await ref.read(ordersPod.notifier).downloadInvoice(_bookingId);
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}/${invoice.filename}');
+      await file.writeAsBytes(invoice.bytes, flush: true);
+      if (!mounted) return;
+      await Share.shareXFiles([XFile(file.path, mimeType: 'application/pdf')],
+          subject: invoice.filename);
+    } on AppException catch (e) {
+      if (mounted) AppToast.show(context, message: e.message, type: ToastType.error);
+    } catch (_) {
+      if (mounted) AppToast.show(context, message: 'Could not download invoice', type: ToastType.error);
+    } finally {
+      if (mounted) setState(() => _downloadingInvoice = false);
+    }
   }
 
   Future<void> _updateStatus(String newStatus) async {
@@ -207,6 +238,29 @@ class _OrderDetailSheetState extends ConsumerState<OrderDetailSheet> {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 16),
+
+                    // Invoice
+                    if (_invoiceMayExist)
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _downloadingInvoice ? null : _downloadInvoice,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.white,
+                            side: const BorderSide(color: AppColors.border),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          icon: _downloadingInvoice
+                              ? const SizedBox(
+                                  width: 16, height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                                )
+                              : const Icon(Icons.receipt_long_rounded, size: 18),
+                          label: Text(_downloadingInvoice ? 'Preparing invoice…' : 'Download Invoice'),
+                        ),
+                      ),
                     const SizedBox(height: 24),
 
                     // Action buttons

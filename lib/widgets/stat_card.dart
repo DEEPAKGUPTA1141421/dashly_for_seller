@@ -8,6 +8,7 @@ class StatCard extends StatelessWidget {
   final double change;
   final IconData icon;
   final Color color;
+  final double? width;
 
   const StatCard({
     super.key,
@@ -16,6 +17,7 @@ class StatCard extends StatelessWidget {
     required this.change,
     required this.icon,
     this.color = AppColors.white,
+    this.width = 155,
   });
 
   @override
@@ -27,7 +29,7 @@ class StatCard extends StatelessWidget {
         ..rotateY(0.015),
       alignment: Alignment.center,
       child: Container(
-        width: 155,
+        width: width,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
           color: AppColors.surface,
@@ -53,7 +55,7 @@ class StatCard extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w600),
                   ),
                 ),
                 const SizedBox(width: 6),

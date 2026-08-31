@@ -63,9 +63,15 @@ class _AttributesStepState extends ConsumerState<AttributesStep> {
   }
 
   void _openSheet(Map attr) {
-    final id      = _id(attr);
-    final label   = attr['name'] as String? ?? 'Select';
-    final isRadio = attr['isRadio'] as bool? ?? true;
+    final id            = _id(attr);
+    final label         = attr['name'] as String? ?? 'Select';
+    final isVariantAttr = attr['isVariantAttribute'] as bool? ?? false;
+    // A variant-defining attribute (e.g. Size, Color) exists specifically to
+    // generate multiple SKU combinations, so it must always allow picking
+    // more than one value — regardless of the backend's isRadio flag, whose
+    // default (false = multi-select) the fallback below already matches.
+    // Getting this wrong silently caps the seller to one value → one SKU.
+    final isRadio = isVariantAttr ? false : (attr['isRadio'] as bool? ?? false);
     final options = (attr['options'] as List<dynamic>?)?.cast<String>() ?? [];
     final current = List<String>.from(_selected[id] ?? []);
 

@@ -1,8 +1,18 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api/api_client.dart';
 import '../core/api/api_endpoints.dart';
 import '../core/errors/app_exception.dart';
+
+/// Result of a successful invoice download — PDF bytes plus the filename the
+/// server suggested via Content-Disposition (falls back to a generic name).
+class InvoiceDownload {
+  final Uint8List bytes;
+  final String filename;
+  const InvoiceDownload({required this.bytes, required this.filename});
+}
 
 class OrdersState {
   final bool isLoading;
@@ -114,6 +124,35 @@ class OrdersNotifier extends StateNotifier<OrdersState> {
       );
     } on DioException catch (e) {
       state = state.copyWith(error: AppException.fromDioError(e).message);
+    }
+  }
+
+  // GET /api/v1/seller/receipt/{bookingId}/download — PDF bytes of this order's invoice.
+  // Throws AppException with a user-facing message on failure (not yet generated,
+  // access denied, etc.) — the caller decides how to surface it.
+  Future<InvoiceDownload> downloadInvoice(String bookingId) async {
+    try {
+      final res = await _client.get<List<int>>(
+        '${ApiEndpoints.sellerReceiptDownload}/$bookingId/download',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = Uint8List.fromList(res.data ?? const []);
+      final disposition = res.headers.value('content-disposition') ?? '';
+      final match = RegExp(r'filename="?([^";]+)"?').firstMatch(disposition);
+      final filename = match?.group(1) ?? 'invoice-$bookingId.pdf';
+      return InvoiceDownload(bytes: bytes, filename: filename);
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 404) {
+        throw const AppException(
+          message: 'Invoice not yet available for this order. Try again shortly.',
+          statusCode: 404,
+        );
+      }
+      if (status == 403) {
+        throw const AppException(message: 'You do not have access to this invoice.', statusCode: 403);
+      }
+      throw AppException.fromDioError(e);
     }
   }
 

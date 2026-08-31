@@ -4,9 +4,11 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/widgets/app_shimmer.dart';
 import '../core/widgets/app_toast.dart';
+import '../models/discount_config.dart';
 import '../providers/product_variants_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
+import '../widgets/products/discount_editor_sheet.dart';
 
 class ProductVariantsScreen extends ConsumerStatefulWidget {
   final String productId;
@@ -119,6 +121,8 @@ class _VariantTile extends StatelessWidget {
 
   const _VariantTile({required this.variant, required this.index, required this.onEdit});
 
+  static String _fmt(double v) => v == v.truncateToDouble() ? v.toInt().toString() : v.toString();
+
   @override
   Widget build(BuildContext context) {
     final label       = variant['label'] as String? ?? '';
@@ -127,6 +131,9 @@ class _VariantTile extends StatelessWidget {
     final mrpRupees   = variant['mrpRupees']   as String? ?? '0.00';
     final stock       = (variant['stock'] as num?)?.toInt() ?? 0;
     final combination = (variant['combination'] as Map?)?.cast<String, String>() ?? {};
+    final discountRaw = variant['discount'] as Map<String, dynamic>?;
+    final discount     = discountRaw != null ? DiscountConfig.fromJson(discountRaw) : null;
+    final isDiscountLive = discount?.currentlyEffective == true;
 
     final bool lowStock = stock <= 5;
 
@@ -181,6 +188,22 @@ class _VariantTile extends StatelessWidget {
                             color: AppColors.greyDark,
                             fontSize: 11,
                             decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
+                      ],
+                      if (isDiscountLive) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.success.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            discount!.type == DiscountType.percentage
+                                ? '${_fmt(discount.value)}% OFF'
+                                : '₹${_fmt(discount.value)} OFF',
+                            style: const TextStyle(color: AppColors.success, fontSize: 10, fontWeight: FontWeight.w700),
                           ),
                         ),
                       ],
@@ -254,6 +277,27 @@ class _VariantEditSheetState extends ConsumerState<_VariantEditSheet> {
     super.dispose();
   }
 
+  Future<void> _manageDiscount(DiscountConfig? config) async {
+    final variantId = widget.variant['id'] as String? ?? '';
+    if (variantId.isEmpty) return;
+
+    HapticUtils.medium();
+    final notifier = ref.read(productVariantsPod.notifier);
+    final ok = config == null
+        ? await notifier.removeVariantDiscount(widget.productId, variantId)
+        : await notifier.setVariantDiscount(widget.productId, variantId, config);
+
+    if (!mounted) return;
+    if (ok) {
+      AppToast.show(context,
+          message: config == null ? 'Discount removed' : 'Discount updated',
+          type: ToastType.success);
+    } else {
+      final err = ref.read(productVariantsPod).error ?? 'Failed to update discount';
+      AppToast.show(context, message: err, type: ToastType.error);
+    }
+  }
+
   Future<void> _save() async {
     final price  = double.tryParse(_priceCtrl.text.trim());
     final stock  = int.tryParse(_stockCtrl.text.trim());
@@ -320,6 +364,17 @@ class _VariantEditSheetState extends ConsumerState<_VariantEditSheet> {
             _Field(label: 'Price (₹)', controller: _priceCtrl, hint: '0.00', isDecimal: true),
             const SizedBox(height: 14),
             _Field(label: 'Stock',     controller: _stockCtrl, hint: '0'),
+            const SizedBox(height: 20),
+            const Text('DISCOUNT', style: TextStyle(color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            DiscountSummaryTile(
+              title: 'Manage discount',
+              discount: widget.variant['discount'] is Map<String, dynamic>
+                  ? DiscountConfig.fromJson(widget.variant['discount'] as Map<String, dynamic>)
+                  : null,
+              mrp: double.tryParse(widget.variant['mrpRupees'] as String? ?? ''),
+              onChanged: _manageDiscount,
+            ),
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,

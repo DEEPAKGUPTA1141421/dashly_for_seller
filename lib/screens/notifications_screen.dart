@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/widgets/app_shimmer.dart';
+import '../providers/notification_preferences_provider.dart';
 import '../providers/notifications_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
@@ -75,8 +76,39 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                           },
                           child: const Text('Mark all read', style: TextStyle(color: AppColors.grey, fontSize: 12)),
                         ),
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.tune_rounded, color: AppColors.white, size: 20),
+                            onPressed: () {
+                              HapticUtils.light();
+                              _showFilterSheet(context, ref);
+                            },
+                          ),
+                          if (state.categoryFilter != null)
+                            Positioned(
+                              right: 8, top: 8,
+                              child: Container(
+                                width: 7, height: 7,
+                                decoration: const BoxDecoration(color: AppColors.info, shape: BoxShape.circle),
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ).animate().fadeIn(),
+                  if (state.categoryFilter != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8, bottom: 4),
+                        child: _ActiveFilterChip(
+                          label: notificationCategoryLabel(state.categoryFilter!),
+                          onClear: () => ref.read(notificationsPod.notifier).setCategoryFilter(null),
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Container(height: 1, color: AppColors.divider),
                 ],
@@ -255,11 +287,16 @@ class _NotifTile extends StatelessWidget {
 
   (IconData, Color) _categoryIcon(String category) {
     switch (category) {
-      case 'ORDER':   return (Icons.shopping_bag_rounded,   AppColors.info);
-      case 'PAYMENT': return (Icons.currency_rupee_rounded, AppColors.success);
-      case 'STOCK':   return (Icons.inventory_2_rounded,    AppColors.warning);
-      case 'PROMO':   return (Icons.local_offer_rounded,    AppColors.white);
-      default:        return (Icons.notifications_rounded,  AppColors.grey);
+      case 'ORDER_UPDATES':    return (Icons.shopping_bag_rounded,     AppColors.info);
+      case 'PAYMENT_UPDATES':  return (Icons.currency_rupee_rounded,   AppColors.success);
+      case 'PRODUCT_UPDATES':  return (Icons.inventory_2_rounded,      AppColors.warning);
+      case 'REVIEW_REMINDERS': return (Icons.star_rounded,             AppColors.warning);
+      case 'WALLET_UPDATES':   return (Icons.account_balance_wallet_rounded, AppColors.success);
+      case 'LOYALTY_UPDATES':  return (Icons.card_giftcard_rounded,    AppColors.white);
+      case 'PROMOTIONS':       return (Icons.local_offer_rounded,      AppColors.white);
+      case 'ACCOUNT_SECURITY': return (Icons.shield_rounded,           AppColors.error);
+      case 'SYSTEM_ALERTS':    return (Icons.info_rounded,             AppColors.grey);
+      default:                 return (Icons.notifications_rounded,   AppColors.grey);
     }
   }
 
@@ -276,6 +313,168 @@ class _NotifTile extends StatelessWidget {
     } catch (_) {
       return '';
     }
+  }
+}
+
+// ── Filter sheet ─────────────────────────────────────────────────────────────
+
+void _showFilterSheet(BuildContext context, WidgetRef ref) {
+  ref.read(notificationPreferencesPod.notifier).fetch();
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: AppColors.surface,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (_) => const _FilterSheet(),
+  );
+}
+
+class _ActiveFilterChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onClear;
+  const _ActiveFilterChip({required this.label, required this.onClear});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.only(left: 10, right: 4, top: 3, bottom: 3),
+      decoration: BoxDecoration(
+        color: AppColors.info.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.info.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.info, fontSize: 12, fontWeight: FontWeight.w600)),
+          GestureDetector(
+            onTap: onClear,
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.close_rounded, color: AppColors.info, size: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterSheet extends ConsumerWidget {
+  const _FilterSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifState = ref.watch(notificationsPod);
+    final prefState   = ref.watch(notificationPreferencesPod);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const Text('Filter', style: TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            const Text('Show only one category in your feed', style: TextStyle(color: AppColors.grey, fontSize: 12)),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _CategoryFilterChip(
+                  label: 'All',
+                  selected: notifState.categoryFilter == null,
+                  onTap: () {
+                    ref.read(notificationsPod.notifier).setCategoryFilter(null);
+                    Navigator.of(context).pop();
+                  },
+                ),
+                ...kNotificationCategories.map((category) => _CategoryFilterChip(
+                      label: notificationCategoryLabel(category),
+                      selected: notifState.categoryFilter == category,
+                      onTap: () {
+                        ref.read(notificationsPod.notifier).setCategoryFilter(category);
+                        Navigator.of(context).pop();
+                      },
+                    )),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Container(height: 1, color: AppColors.divider),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Notify me about', style: TextStyle(color: AppColors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+                TextButton(
+                  onPressed: () => ref.read(notificationPreferencesPod.notifier).setAll(true),
+                  child: const Text('Select all', style: TextStyle(color: AppColors.grey, fontSize: 12)),
+                ),
+                TextButton(
+                  onPressed: () => ref.read(notificationPreferencesPod.notifier).setAll(false),
+                  child: const Text('Unselect all', style: TextStyle(color: AppColors.grey, fontSize: 12)),
+                ),
+              ],
+            ),
+            if (prefState.isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(child: CircularProgressIndicator(color: AppColors.white, strokeWidth: 2)),
+              )
+            else
+              ...kNotificationCategories.map((category) => SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(notificationCategoryLabel(category),
+                        style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                    value: prefState.inAppEnabled[category] ?? true,
+                    onChanged: (v) => ref.read(notificationPreferencesPod.notifier).setEnabled(category, v),
+                  )),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryFilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _CategoryFilterChip({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () { HapticUtils.light(); onTap(); },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.accent : AppColors.surface2,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? AppColors.accent : AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? AppColors.surface : AppColors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
   }
 }
 

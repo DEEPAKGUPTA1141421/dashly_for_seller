@@ -29,15 +29,15 @@ class AppTheme {
   // ── Shadows ──────────────────────────────────────────────────────────────
   static List<BoxShadow> get cardShadow => [
     BoxShadow(
-      color: Colors.black.withOpacity(0.4),
-      blurRadius: 12,
+      color: Colors.black.withOpacity(0.10),
+      blurRadius: 20,
       offset: const Offset(0, 4),
     ),
   ];
 
   static List<BoxShadow> get glowWhite => [
     BoxShadow(
-      color: AppColors.white.withOpacity(0.15),
+      color: Colors.black.withOpacity(0.10),
       blurRadius: 20,
       spreadRadius: 2,
     ),
@@ -60,34 +60,36 @@ class AppTheme {
     color: AppColors.white, fontSize: 15, fontWeight: FontWeight.w600,
   );
   static const TextStyle bodyLg = TextStyle(
-    color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w400,
+    color: AppColors.white, fontSize: 16, fontWeight: FontWeight.w500,
   );
   static const TextStyle bodyMd = TextStyle(
-    color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w400,
+    color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w500,
   );
   static const TextStyle bodySm = TextStyle(
-    color: AppColors.white, fontSize: 12, fontWeight: FontWeight.w400,
+    color: AppColors.white, fontSize: 12, fontWeight: FontWeight.w500,
   );
   static const TextStyle labelLg = TextStyle(
-    color: AppColors.grey, fontSize: 13, fontWeight: FontWeight.w500,
+    color: AppColors.grey, fontSize: 13, fontWeight: FontWeight.w600,
   );
   static const TextStyle labelMd = TextStyle(
-    color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.3,
+    color: AppColors.grey, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.3,
   );
   static const TextStyle mono = TextStyle(
     color: AppColors.white, fontSize: 13, fontFamily: 'monospace',
   );
 
   // ── ThemeData ─────────────────────────────────────────────────────────────
+  // Named `dark` for historical/minimal-churn reasons — it now renders the
+  // Figma-matched light palette defined in AppColors.
   static ThemeData get dark => ThemeData(
-    brightness: Brightness.dark,
+    brightness: Brightness.light,
     scaffoldBackgroundColor: AppColors.bg,
-    colorScheme: const ColorScheme.dark(
+    colorScheme: const ColorScheme.light(
       surface: AppColors.surface,
-      primary: AppColors.white,
-      onPrimary: AppColors.bg,
+      primary: AppColors.accent,
+      onPrimary: AppColors.surface,
       error: AppColors.error,
-      onError: AppColors.white,
+      onError: AppColors.surface,
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.surface,
@@ -183,9 +185,11 @@ class AppTheme {
     ),
     switchTheme: SwitchThemeData(
       thumbColor: MaterialStateProperty.resolveWith((states) =>
-          states.contains(MaterialState.selected) ? AppColors.bg : AppColors.grey),
+          states.contains(MaterialState.selected) ? AppColors.surface : AppColors.grey),
       trackColor: MaterialStateProperty.resolveWith((states) =>
-          states.contains(MaterialState.selected) ? AppColors.white : AppColors.surface3),
+          states.contains(MaterialState.selected) ? AppColors.accent : AppColors.surface3),
+      trackOutlineColor: MaterialStateProperty.resolveWith((states) =>
+          states.contains(MaterialState.selected) ? Colors.transparent : AppColors.border),
     ),
   );
 

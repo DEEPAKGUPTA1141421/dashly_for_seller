@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../../models/discount_config.dart';
 import '../../../providers/add_product_provider.dart';
 import '../../../utils/app_colors.dart';
 import '../../../utils/sound_utils.dart';
+import '../../../widgets/products/discount_editor_sheet.dart';
 
 // ── Data model for one SKU combination ───────────────────────────────────────
 
@@ -18,6 +20,7 @@ class _ComboItem {
   final TextEditingController stockCtrl;
   final TextEditingController skuCtrl;
   bool isExpanded;
+  DiscountConfig? discount;
 
   _ComboItem({
     required this.combination,
@@ -28,6 +31,7 @@ class _ComboItem {
     required this.stockCtrl,
     required this.skuCtrl,
     this.isExpanded = false,
+    this.discount,
   });
 
   void dispose() {
@@ -47,6 +51,7 @@ class _ComboItem {
     'mrp':         double.tryParse(mrpCtrl.text.trim()) ?? 0,
     'stock':       int.tryParse(stockCtrl.text.trim()) ?? 0,
     'sku':         skuCtrl.text.trim().isEmpty ? autoSku : skuCtrl.text.trim(),
+    'discount':    discount?.toJson(),
   };
 }
 
@@ -109,6 +114,12 @@ class _VariantsStepState extends ConsumerState<VariantsStep> {
             text: saved != null && (saved['sku']?.toString() ?? '').isNotEmpty
                 ? saved['sku'].toString() : autoSku),
         isExpanded:  i == 0,
+        // Prefer a discount already saved on this combo (e.g. resumed edit
+        // mode); otherwise default to whatever was configured on the
+        // (legacy) Pricing step for newly-generated combos.
+        discount: saved?['discount'] is Map<String, dynamic>
+            ? DiscountConfig.fromJson(saved!['discount'] as Map<String, dynamic>)
+            : s.discount,
       ));
     }
   }
@@ -179,6 +190,7 @@ class _VariantsStepState extends ConsumerState<VariantsStep> {
     final priceCtrl = TextEditingController();
     final mrpCtrl   = TextEditingController();
     final stockCtrl = TextEditingController();
+    final discountHolder = _DiscountHolder();
 
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
@@ -188,6 +200,7 @@ class _VariantsStepState extends ConsumerState<VariantsStep> {
         priceCtrl: priceCtrl,
         mrpCtrl:   mrpCtrl,
         stockCtrl: stockCtrl,
+        discountHolder: discountHolder,
       ),
     );
 
@@ -197,6 +210,7 @@ class _VariantsStepState extends ConsumerState<VariantsStep> {
           if (priceCtrl.text.isNotEmpty) item.priceCtrl.text = priceCtrl.text;
           if (mrpCtrl.text.isNotEmpty)   item.mrpCtrl.text   = mrpCtrl.text;
           if (stockCtrl.text.isNotEmpty) item.stockCtrl.text = stockCtrl.text;
+          if (discountHolder.applyToAll) item.discount = discountHolder.discount;
         }
       });
       SoundUtils.success();
@@ -488,6 +502,16 @@ class _ExpandedBody extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          DiscountSummaryTile(
+            title: 'Discount — ${item.label.isEmpty ? "this SKU" : item.label}',
+            discount: item.discount,
+            mrp: double.tryParse(item.mrpCtrl.text.trim()),
+            onChanged: (d) {
+              item.discount = d;
+              onChanged();
+            },
+          ),
         ],
       ),
     );
@@ -562,17 +586,32 @@ class _Field extends StatelessWidget {
 
 // ── Apply-to-all bottom sheet ─────────────────────────────────────────────────
 
-class _ApplyAllSheet extends StatelessWidget {
+/// Mutable out-param for the discount choice made inside [_ApplyAllSheet] —
+/// mirrors how the price/MRP/stock controllers carry their result back to
+/// the caller, since a discount isn't representable by a TextEditingController.
+class _DiscountHolder {
+  DiscountConfig? discount;
+  bool applyToAll = false;
+}
+
+class _ApplyAllSheet extends StatefulWidget {
   final TextEditingController priceCtrl;
   final TextEditingController mrpCtrl;
   final TextEditingController stockCtrl;
+  final _DiscountHolder discountHolder;
 
   const _ApplyAllSheet({
     required this.priceCtrl,
     required this.mrpCtrl,
     required this.stockCtrl,
+    required this.discountHolder,
   });
 
+  @override
+  State<_ApplyAllSheet> createState() => _ApplyAllSheetState();
+}
+
+class _ApplyAllSheetState extends State<_ApplyAllSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -612,12 +651,12 @@ class _ApplyAllSheet extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: _Field(ctrl: priceCtrl, label: 'Sell Price',
+                      child: _Field(ctrl: widget.priceCtrl, label: 'Sell Price',
                           hint: '999', prefix: '₹', onChanged: () {}),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: _Field(ctrl: mrpCtrl, label: 'MRP',
+                      child: _Field(ctrl: widget.mrpCtrl, label: 'MRP',
                           hint: '1299', prefix: '₹', onChanged: () {}),
                     ),
                   ],
@@ -625,9 +664,40 @@ class _ApplyAllSheet extends StatelessWidget {
                 const SizedBox(height: 12),
                 SizedBox(
                   width: 160,
-                  child: _Field(ctrl: stockCtrl, label: 'Stock',
+                  child: _Field(ctrl: widget.stockCtrl, label: 'Stock',
                       hint: '50', isNumber: true, onChanged: () {}),
                 ),
+                const SizedBox(height: 18),
+                Container(height: 1, color: AppColors.divider),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text('Same discount for all SKUs',
+                          style: TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                    Switch(
+                      value: widget.discountHolder.applyToAll,
+                      onChanged: (v) => setState(() => widget.discountHolder.applyToAll = v),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.discountHolder.applyToAll
+                      ? 'This discount will replace each SKU\'s individual discount'
+                      : 'Off — set a discount separately for each SKU',
+                  style: const TextStyle(color: AppColors.grey, fontSize: 11.5),
+                ),
+                if (widget.discountHolder.applyToAll) ...[
+                  const SizedBox(height: 10),
+                  DiscountSummaryTile(
+                    title: 'Discount for all SKUs',
+                    discount: widget.discountHolder.discount,
+                    mrp: double.tryParse(widget.mrpCtrl.text.trim()),
+                    onChanged: (d) => setState(() => widget.discountHolder.discount = d),
+                  ),
+                ],
                 const SizedBox(height: 20),
                 Row(
                   children: [

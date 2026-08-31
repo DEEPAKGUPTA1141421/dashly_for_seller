@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../core/theme/responsive.dart';
 import '../core/widgets/app_shimmer.dart';
 import '../main_layout.dart';
 import '../providers/dashboard_provider.dart';
@@ -11,11 +12,19 @@ import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
 import '../utils/storage_service.dart';
 import '../widgets/stat_card.dart';
-import '../widgets/mini_sales_chart.dart';
 import '../widgets/order_list_tile.dart';
+import '../widgets/dashboard/total_customers_card.dart';
+import '../widgets/dashboard/new_customer_donut_card.dart';
+import '../widgets/dashboard/sales_trend_card.dart';
+import '../widgets/dashboard/popular_products_card.dart';
+import '../widgets/dashboard/comments_card.dart';
+import '../widgets/dashboard/cancelled_orders_card.dart';
+import '../widgets/dashboard/pro_tips_card.dart';
+import '../widgets/dashboard/share_shop_card.dart';
 import 'auth/location_screen.dart';
-import 'earnings_screen.dart';
 import 'notifications_screen.dart';
+import 'reviews_screen.dart';
+import 'settings_screen.dart';
 
 final _displayNamePod = FutureProvider<String>((ref) async =>
     await StorageService.getDisplayName() ?? '');
@@ -49,11 +58,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final state    = ref.watch(dashboardPod);
     final settings = ref.watch(settingsPod);
+    final hPad     = Responsive.horizontalPadding(context);
+    final twoCol   = !Responsive.isMobile(context);
 
     if (settings.isLoading && settings.personal.isEmpty) {
       return const Scaffold(
         backgroundColor: AppColors.bg,
-        body: Center(child: CircularProgressIndicator(color: AppColors.white)),
+        body: Center(child: CircularProgressIndicator(color: AppColors.accent)),
       );
     }
 
@@ -66,7 +77,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _refresh,
-          color: AppColors.white,
+          color: AppColors.accent,
           backgroundColor: AppColors.surface,
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -74,7 +85,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               // App bar
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                  padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 0),
                   child: Row(
                     children: [
                       Column(
@@ -96,7 +107,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         ],
                       ),
                       const Spacer(),
-                      // Notification bell
                       _BellButton(
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(builder: (_) => const NotificationsScreen()),
@@ -109,11 +119,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-              // Onboarding incomplete banner
               if (!settings.onboardingComplete)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 0),
                     child: _OnboardingBanner(
                       onTap: () {
                         HapticUtils.light();
@@ -123,11 +132,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ).animate().fadeIn(),
                 ),
 
-              // Needs-attention banner (CONFIRMED orders awaiting acceptance)
               if (!state.isLoading && (state.stats['pendingOrders'] as num? ?? 0) > 0)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                    padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 0),
                     child: _NeedsAttentionBanner(
                       count: (state.stats['pendingOrders'] as num).toInt(),
                       onTap: () => ref.read(navIndexPod.notifier).state = 1,
@@ -137,114 +145,102 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
 
-              // Error state — don't show mock/zero stats when the fetch failed
               if (!state.isLoading && state.error != null)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 24),
                     child: _DashboardErrorState(onRetry: _refresh),
                   ).animate().fadeIn(),
                 ),
 
-              // Stat cards
+              // Stat cards (2 per row)
               if (!(!state.isLoading && state.error != null))
-              SliverToBoxAdapter(
-                child: state.isLoading
-                    ? SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(
-                          children: List.generate(4, (i) => Padding(
-                            padding: EdgeInsets.only(right: i < 3 ? 12 : 0),
-                            child: const SizedBox(width: 155, child: StatCardShimmer()),
-                          )),
-                        ),
-                      )
-                    : SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: hPad),
+                    child: state.isLoading
+                        ? const Column(
                             children: [
-                              StatCard(
-                                title: 'Total Revenue',
-                                value: _formatCurrency(state.stats['totalRevenue']),
-                                change: (state.stats['revenueChange'] as num?)?.toDouble() ?? 0,
-                                icon: Icons.currency_rupee_rounded,
-                                color: AppColors.white,
+                              Row(
+                                children: [
+                                  Expanded(child: SizedBox(height: 110, child: StatCardShimmer())),
+                                  SizedBox(width: 12),
+                                  Expanded(child: SizedBox(height: 110, child: StatCardShimmer())),
+                                ],
                               ),
-                              const SizedBox(width: 12),
-                              StatCard(
-                                title: 'Total Orders',
-                                value: '${state.stats['totalOrders'] ?? 0}',
-                                change: (state.stats['ordersChange'] as num?)?.toDouble() ?? 0,
-                                icon: Icons.shopping_bag_rounded,
-                                color: AppColors.info,
+                              SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(child: SizedBox(height: 110, child: StatCardShimmer())),
+                                  SizedBox(width: 12),
+                                  Expanded(child: SizedBox(height: 110, child: StatCardShimmer())),
+                                ],
                               ),
-                              const SizedBox(width: 12),
-                              StatCard(
-                                title: 'Products',
-                                value: '${state.stats['totalProducts'] ?? 0}',
-                                change: (state.stats['productsChange'] as num?)?.toDouble() ?? 0,
-                                icon: Icons.inventory_2_rounded,
-                                color: AppColors.success,
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                  Expanded(
+                                    child: StatCard(
+                                      width: null,
+                                      title: 'Total Revenue',
+                                      value: _formatCurrency(state.stats['totalRevenue']),
+                                      change: (state.stats['revenueChange'] as num?)?.toDouble() ?? 0,
+                                      icon: Icons.currency_rupee_rounded,
+                                      color: AppColors.accent,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: StatCard(
+                                      width: null,
+                                      title: 'Total Orders',
+                                      value: '${state.stats['totalOrders'] ?? 0}',
+                                      change: (state.stats['ordersChange'] as num?)?.toDouble() ?? 0,
+                                      icon: Icons.shopping_bag_rounded,
+                                      color: AppColors.info,
+                                    ),
+                                  ),
+                                  ],
+                                ),
                               ),
-                              const SizedBox(width: 12),
-                              StatCard(
-                                title: 'Pending',
-                                value: '${state.stats['pendingOrders'] ?? 0}',
-                                change: (state.stats['pendingChange'] as num?)?.toDouble() ?? 0,
-                                icon: Icons.local_shipping_rounded,
-                                color: AppColors.warning,
+                              const SizedBox(height: 12),
+                              IntrinsicHeight(
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                  Expanded(
+                                    child: StatCard(
+                                      width: null,
+                                      title: 'Products',
+                                      value: '${state.stats['totalProducts'] ?? 0}',
+                                      change: (state.stats['productsChange'] as num?)?.toDouble() ?? 0,
+                                      icon: Icons.inventory_2_rounded,
+                                      color: AppColors.success,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: StatCard(
+                                      width: null,
+                                      title: 'Pending',
+                                      value: '${state.stats['pendingOrders'] ?? 0}',
+                                      change: (state.stats['pendingChange'] as num?)?.toDouble() ?? 0,
+                                      icon: Icons.local_shipping_rounded,
+                                      color: AppColors.warning,
+                                    ),
+                                  ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
-                        ),
-                      ),
-              ),
-
-              const SliverToBoxAdapter(child: SizedBox(height: 28)),
-
-              // Sales chart
-              if (state.isLoading || state.error == null)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Sales Overview',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        state.isLoading
-                            ? const AppShimmer(child: ShimmerBox(height: 200))
-                            : MiniSalesChart(data: state.salesChart),
-                      ],
-                    ).animate().fadeIn(delay: 100.ms),
                   ),
                 ),
-
-              if (state.isLoading || state.error == null) const SliverToBoxAdapter(child: SizedBox(height: 28)),
-
-              // Earnings card
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: _EarningsCard(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const EarningsScreen()),
-                    ),
-                  ),
-                ).animate().fadeIn(delay: 120.ms),
-              ),
 
               const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
@@ -252,7 +248,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               if (state.alerts.isNotEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: EdgeInsets.symmetric(horizontal: hPad),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -269,11 +265,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
               if (state.alerts.isNotEmpty) const SliverToBoxAdapter(child: SizedBox(height: 28)),
 
+              // Figma-matched insight cards
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: hPad),
+                  child: state.isLoading
+                      ? const Column(
+                          children: [
+                            AppShimmer(child: ShimmerBox(height: 260)),
+                            SizedBox(height: 16),
+                            AppShimmer(child: ShimmerBox(height: 220)),
+                          ],
+                        )
+                      : (twoCol
+                          ? _TwoColumnInsights(state: state, settings: settings, onGoTo: _goTo)
+                          : _SingleColumnInsights(state: state, settings: settings, onGoTo: _goTo)),
+                ),
+              ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 28)),
+
               // Recent orders
               if (state.isLoading || state.error == null) ...[
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: EdgeInsets.symmetric(horizontal: hPad),
                     child: Row(
                       children: [
                         const Text(
@@ -284,7 +300,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         GestureDetector(
                           onTap: () {
                             HapticUtils.light();
-                            ref.read(navIndexPod.notifier).state = 1; // Orders tab
+                            ref.read(navIndexPod.notifier).state = 1;
                           },
                           child: const Text(
                             'See all',
@@ -301,9 +317,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 if (state.isLoading)
                   SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (_, __) => const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                        child: OrderItemShimmer(),
+                      (_, __) => Padding(
+                        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 6),
+                        child: const OrderItemShimmer(),
                       ),
                       childCount: 4,
                     ),
@@ -312,7 +328,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (_, i) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 4),
                         child: OrderListTile(order: state.recentOrders[i] as Map),
                       ),
                       childCount: state.recentOrders.length,
@@ -328,6 +344,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
+  void _goTo(int tabIndex) {
+    ref.read(navIndexPod.notifier).state = tabIndex;
+  }
+
   String _greeting() {
     final hour = DateTime.now().hour;
     if (hour < 12) return 'morning';
@@ -341,6 +361,126 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return '₹${NumberFormat.compact().format(amount)}';
   }
 }
+
+/// Mobile stacking order, matching the Figma reference screenshots:
+/// Total customers → Sales trend → Pro tips → Get more customers →
+/// New customer → Comments → Popular products → Cancelled/refunded.
+class _SingleColumnInsights extends StatelessWidget {
+  final DashboardState state;
+  final SettingsState settings;
+  final void Function(int) onGoTo;
+  const _SingleColumnInsights({required this.state, required this.settings, required this.onGoTo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        TotalCustomersCard(customerStats: state.customerStats),
+        const SizedBox(height: 16),
+        SalesTrendCard(salesChart: state.salesChart),
+        const SizedBox(height: 16),
+        ProTipsCard(tips: _proTips(context, onGoTo)),
+        const SizedBox(height: 16),
+        ShareShopCard(
+          sellerName: settings.personal['displayName'] as String? ?? settings.personal['fullName'] as String?,
+          totalProducts: (state.stats['totalProducts'] as num?)?.toInt(),
+          totalCustomers: (state.customerStats['totalCustomers'] as num?)?.toInt(),
+          coverImageUrl: settings.personal['profile_image'] as String?,
+        ),
+        const SizedBox(height: 16),
+        NewCustomerDonutCard(customerStats: state.customerStats),
+        const SizedBox(height: 16),
+        CommentsCard(
+          reviews: state.recentReviews,
+          onViewAll: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReviewsScreen())),
+        ),
+        const SizedBox(height: 16),
+        PopularProductsCard(topProducts: state.topProducts, onSeeAll: () => onGoTo(3)),
+        const SizedBox(height: 16),
+        CancelledOrdersCard(statusCounts: state.statusCounts, onTap: () => onGoTo(1)),
+      ],
+    );
+  }
+}
+
+/// Desktop/tablet two-column layout, matching the Figma reference screenshots:
+/// left column = Total customers, Sales trend, Pro tips, Get more customers.
+/// right column = New customer, Comments, Popular products, Cancelled/refunded.
+class _TwoColumnInsights extends StatelessWidget {
+  final DashboardState state;
+  final SettingsState settings;
+  final void Function(int) onGoTo;
+  const _TwoColumnInsights({required this.state, required this.settings, required this.onGoTo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 3,
+          child: Column(
+            children: [
+              TotalCustomersCard(customerStats: state.customerStats),
+              const SizedBox(height: 16),
+              SalesTrendCard(salesChart: state.salesChart),
+              const SizedBox(height: 16),
+              ProTipsCard(tips: _proTips(context, onGoTo)),
+              const SizedBox(height: 16),
+              ShareShopCard(
+                sellerName: settings.personal['displayName'] as String? ?? settings.personal['fullName'] as String?,
+                totalProducts: (state.stats['totalProducts'] as num?)?.toInt(),
+                totalCustomers: (state.customerStats['totalCustomers'] as num?)?.toInt(),
+                coverImageUrl: settings.personal['profile_image'] as String?,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          flex: 2,
+          child: Column(
+            children: [
+              NewCustomerDonutCard(customerStats: state.customerStats),
+              const SizedBox(height: 16),
+              CommentsCard(
+                reviews: state.recentReviews,
+                onViewAll: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReviewsScreen())),
+              ),
+              const SizedBox(height: 16),
+              PopularProductsCard(topProducts: state.topProducts, onSeeAll: () => onGoTo(3)),
+              const SizedBox(height: 16),
+              CancelledOrdersCard(statusCounts: state.statusCounts, onTap: () => onGoTo(1)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+List<ProTip> _proTips(BuildContext context, void Function(int) onGoTo) => [
+      ProTip(
+        icon: Icons.verified_user_outlined,
+        title: 'Complete your KYC to unlock full payouts',
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+      ),
+      ProTip(
+        icon: Icons.photo_camera_outlined,
+        title: 'Add clear product photos to boost conversions',
+        onTap: () => onGoTo(3),
+      ),
+      ProTip(
+        icon: Icons.inventory_2_outlined,
+        title: 'Restock low-inventory products before you run out',
+        onTap: () => onGoTo(3),
+      ),
+      ProTip(
+        icon: Icons.reviews_outlined,
+        title: 'Respond to customer reviews to build trust',
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReviewsScreen())),
+      ),
+    ];
 
 class _DashboardErrorState extends StatelessWidget {
   final Future<void> Function() onRetry;
@@ -377,12 +517,12 @@ class _DashboardErrorState extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppColors.accent,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Text(
                 'Retry',
-                style: TextStyle(color: AppColors.bg, fontSize: 13, fontWeight: FontWeight.w700),
+                style: TextStyle(color: AppColors.surface, fontSize: 13, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -436,50 +576,6 @@ class _NeedsAttentionBanner extends StatelessWidget {
               ),
             ),
             const Icon(Icons.chevron_right_rounded, color: AppColors.warning, size: 20),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EarningsCard extends StatelessWidget {
-  final VoidCallback onTap;
-  const _EarningsCard({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () { HapticUtils.light(); onTap(); },
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.account_balance_wallet_rounded, color: AppColors.success, size: 22),
-            ),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Earnings & Wallet', style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w700)),
-                  SizedBox(height: 2),
-                  Text('View balance & transactions', style: TextStyle(color: AppColors.grey, fontSize: 12)),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.greyDark, size: 20),
           ],
         ),
       ),

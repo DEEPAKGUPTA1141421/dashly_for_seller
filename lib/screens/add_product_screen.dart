@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/theme/responsive.dart';
 import '../providers/add_product_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
@@ -120,6 +121,37 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
     );
   }
 
+  void _confirmExit(BuildContext context) {
+    HapticUtils.light();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Exit for now?',
+          style: TextStyle(color: AppColors.white, fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'Your progress is saved as a draft — you can pick up right where you left off next time.',
+          style: TextStyle(color: AppColors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Keep Editing', style: TextStyle(color: AppColors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pop();
+            },
+            child: const Text('Exit', style: TextStyle(color: AppColors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showDraftDialog(BuildContext context) {
     showDialog<void>(
       context: context,
@@ -221,6 +253,17 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
             ],
           ),
           centerTitle: true,
+          // A dedicated exit affordance on every step — the back arrow above
+          // only steps back one page at a time, so without this a seller on
+          // e.g. Review had no way out short of tapping back six times.
+          actions: [
+            if (step > 0)
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: AppColors.white, size: 20),
+                tooltip: 'Exit',
+                onPressed: () => _confirmExit(context),
+              ),
+          ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
             child: Container(height: 1, color: AppColors.divider),
@@ -242,19 +285,29 @@ class _AddProductScreenState extends ConsumerState<AddProductScreen> {
             ),
             const Divider(color: AppColors.border, height: 1),
             Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                transitionBuilder: (child, anim) => FadeTransition(
-                  opacity: anim,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.04, 0),
-                      end: Offset.zero,
-                    ).animate(anim),
-                    child: child,
+              // Centered with a readable max width on tablet/laptop so form
+              // fields don't stretch edge-to-edge next to the sidebar; full
+              // width (and thus unconstrained) on phones.
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: Responsive.isMobile(context) ? double.infinity : 640,
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0.04, 0),
+                          end: Offset.zero,
+                        ).animate(anim),
+                        child: child,
+                      ),
+                    ),
+                    child: KeyedSubtree(key: ValueKey(step), child: steps[step]),
                   ),
                 ),
-                child: KeyedSubtree(key: ValueKey(step), child: steps[step]),
               ),
             ),
           ],
@@ -388,118 +441,133 @@ class StepBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Center-aligned when the row fits the available width (tablet/laptop);
+    // scrolls horizontally when it doesn't (narrow phones). A Center wrapping
+    // a SingleChildScrollView — rather than a ListView, which always spans
+    // its full cross axis — lets the min-sized Row be centered by its parent.
     return SizedBox(
       height: 108,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        itemCount: total,
-        itemBuilder: (_, i) {
-          // done = completed (green), tappable if within maxReached
-          final done      = i < maxReached;
-          final active    = i == current;
-          final tappable  = i <= maxReached && !active;
-
-          return Row(
+      child: Center(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              GestureDetector(
-                onTap: tappable ? () => onStepTap?.call(i) : null,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // ── Circle ──────────────────────────────────────────────
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 320),
-                      curve: Curves.easeOutCubic,
-                      width:  active ? 54 : (done ? 48 : 44),
-                      height: active ? 54 : (done ? 48 : 44),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: done
-                            ? AppColors.success
-                            : active
-                                ? AppColors.white
-                                : AppColors.surface,
-                        border: Border.all(
-                          color: done
-                              ? AppColors.success
-                              : active
-                                  ? AppColors.white
-                                  : AppColors.border,
-                          width: active ? 2.5 : 1.5,
-                        ),
-                        boxShadow: active
-                            ? [BoxShadow(color: Colors.white.withOpacity(0.16), blurRadius: 14, spreadRadius: 1)]
-                            : done
-                                ? [BoxShadow(color: AppColors.success.withOpacity(0.28), blurRadius: 8)]
-                                : null,
-                      ),
-                      child: Center(
-                        child: done
-                            ? const Icon(CupertinoIcons.checkmark, color: Colors.white, size: 20)
-                            : Icon(
-                                icons[i],
-                                color: active ? AppColors.bg : AppColors.greyDark,
-                                size: active ? 24 : 20,
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 7),
-                    // ── Label ────────────────────────────────────────────────
-                    AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 280),
-                      style: TextStyle(
-                        color: done
-                            ? AppColors.success
-                            : active ? AppColors.white : AppColors.greyDark,
-                        fontSize:      active ? 11.5 : 10.5,
-                        fontWeight:    active ? FontWeight.w700 : (done ? FontWeight.w500 : FontWeight.w400),
-                        letterSpacing: active ? 0.2 : 0,
-                      ),
-                      child: Text(labels[i]),
-                    ),
-                  ],
-                ),
-              )
-              .animate(delay: Duration(milliseconds: i * 50))
-              .fadeIn(duration: 300.ms),
+              for (var i = 0; i < total; i++) _buildStep(i),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-              // ── Connector ────────────────────────────────────────────────
-              if (i < total - 1)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 26),
-                  child: SizedBox(
+  Widget _buildStep(int i) {
+    // done = completed (green), tappable if within maxReached
+    final done      = i < maxReached;
+    final active    = i == current;
+    final tappable  = i <= maxReached && !active;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        GestureDetector(
+          onTap: tappable ? () => onStepTap?.call(i) : null,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Circle ──────────────────────────────────────────────
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 320),
+                curve: Curves.easeOutCubic,
+                width:  active ? 54 : (done ? 48 : 44),
+                height: active ? 54 : (done ? 48 : 44),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: done
+                      ? AppColors.success
+                      : active
+                          ? AppColors.white
+                          : AppColors.surface,
+                  border: Border.all(
+                    color: done
+                        ? AppColors.success
+                        : active
+                            ? AppColors.white
+                            : AppColors.border,
+                    width: active ? 2.5 : 1.5,
+                  ),
+                  boxShadow: active
+                      ? [BoxShadow(color: Colors.white.withOpacity(0.16), blurRadius: 14, spreadRadius: 1)]
+                      : done
+                          ? [BoxShadow(color: AppColors.success.withOpacity(0.28), blurRadius: 8)]
+                          : null,
+                ),
+                child: Center(
+                  child: done
+                      ? const Icon(CupertinoIcons.checkmark, color: Colors.white, size: 20)
+                      : Icon(
+                          icons[i],
+                          // grey (not the near-invisible greyDark) so pending
+                          // step icons stay legible on the white background.
+                          color: active ? AppColors.bg : AppColors.grey,
+                          size: active ? 24 : 20,
+                        ),
+                ),
+              ),
+              const SizedBox(height: 7),
+              // ── Label ────────────────────────────────────────────────
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 280),
+                style: TextStyle(
+                  color: done
+                      ? AppColors.success
+                      : active ? AppColors.white : AppColors.grey,
+                  fontSize:      active ? 11.5 : 10.5,
+                  fontWeight:    active ? FontWeight.w700 : (done ? FontWeight.w500 : FontWeight.w400),
+                  letterSpacing: active ? 0.2 : 0,
+                ),
+                child: Text(labels[i]),
+              ),
+            ],
+          ),
+        )
+        .animate(delay: Duration(milliseconds: i * 50))
+        .fadeIn(duration: 300.ms),
+
+        // ── Connector ────────────────────────────────────────────────
+        if (i < total - 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 26),
+            child: SizedBox(
+              width: 26, height: 2,
+              child: Stack(
+                children: [
+                  Container(
                     width: 26, height: 2,
-                    child: Stack(
-                      children: [
-                        Container(
-                          width: 26, height: 2,
-                          decoration: BoxDecoration(
-                            color: AppColors.border,
-                            borderRadius: BorderRadius.circular(1),
-                          ),
-                        ),
-                        AnimatedOpacity(
-                          opacity: done ? 1.0 : 0.0,
-                          duration: const Duration(milliseconds: 400),
-                          child: Container(
-                            width: 26, height: 2,
-                            decoration: BoxDecoration(
-                              color: AppColors.success,
-                              borderRadius: BorderRadius.circular(1),
-                            ),
-                          ),
-                        ),
-                      ],
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(1),
                     ),
                   ),
-                ),
-            ],
-          );
-        },
-      ),
+                  AnimatedOpacity(
+                    opacity: done ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 400),
+                    child: Container(
+                      width: 26, height: 2,
+                      decoration: BoxDecoration(
+                        color: AppColors.success,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -106,10 +106,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       ),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.storefront_rounded,
-                    color: AppColors.bg,
-                    size: 36,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 72,
+                      height: 72,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 ),
               ),
@@ -167,7 +171,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   'By continuing, you confirm that you are above\n18 years of age and agree to our Terms of Service',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    color: AppColors.greyDark,
+                    color: AppColors.grey,
                     fontSize: 12,
                     height: 1.6,
                   ),

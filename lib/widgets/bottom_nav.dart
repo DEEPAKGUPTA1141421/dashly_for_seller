@@ -25,6 +25,11 @@ class SellerBottomNav extends StatelessWidget {
       label: 'Orders',
     ),
     _NavItem(
+      icon:       CupertinoIcons.doc_plaintext,
+      activeIcon: CupertinoIcons.doc_plaintext,
+      label: 'Invoices',
+    ),
+    _NavItem(
       icon:       CupertinoIcons.cube_box,
       activeIcon: CupertinoIcons.cube_box_fill,
       label: 'Products',
@@ -49,7 +54,7 @@ class SellerBottomNav extends StatelessWidget {
         border: const Border(top: BorderSide(color: AppColors.border)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 16,
             offset: const Offset(0, -4),
           ),

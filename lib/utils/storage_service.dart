@@ -7,6 +7,7 @@ class StorageService {
   static const _refreshTokenKey       = 'seller_refresh_token';
   static const _sellerIdKey           = 'seller_id';
   static const _displayNameKey        = 'seller_display_name';
+  static const _deviceIdKey           = 'seller_push_device_id';
 
   // In-memory cache — populated on saveTokens so interceptor never reads null
   // from an uninitialized FlutterSecureStorage instance on Android.
@@ -50,6 +51,13 @@ class StorageService {
       _storage.write(key: _displayNameKey, value: name);
 
   static Future<String?> getDisplayName() async => _storage.read(key: _displayNameKey);
+
+  static Future<void> saveDeviceId(String id) async =>
+      _storage.write(key: _deviceIdKey, value: id);
+
+  static Future<String?> getDeviceId() async => _storage.read(key: _deviceIdKey);
+
+  static Future<void> clearDeviceId() async => _storage.delete(key: _deviceIdKey);
 
   static Future<void> clearAll() async {
     _cachedAccessToken  = null;

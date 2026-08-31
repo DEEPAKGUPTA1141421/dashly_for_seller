@@ -73,7 +73,7 @@ class AppTextField extends StatelessWidget {
           ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(color: AppColors.greyDark, fontSize: 14),
+            hintStyle: const TextStyle(color: AppColors.grey, fontSize: 14),
             counterText: '',
             prefixText: prefix,
             prefixStyle: const TextStyle(color: AppColors.grey, fontSize: 15),

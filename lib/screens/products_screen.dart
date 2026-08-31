@@ -4,12 +4,16 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/theme/responsive.dart';
 import '../core/widgets/app_shimmer.dart';
 import '../core/widgets/app_toast.dart';
 import '../core/widgets/confirm_modal.dart';
 import '../providers/products_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/haptic_utils.dart';
+import '../widgets/products/product_list_card.dart';
+import '../widgets/products/product_table_row.dart';
+import '../widgets/products/scheduled_product_row.dart';
 import 'add_product/catalog_search_screen.dart';
 import 'add_product_screen.dart';
 import 'edit_product_screen.dart';
@@ -28,6 +32,10 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
   ProductFilterParams _filters = ProductFilterParams.defaults;
   Timer? _searchDebounce;
 
+  final _scheduledSearchCtrl = TextEditingController();
+  String _scheduledQuery = '';
+  Timer? _scheduledSearchDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +46,8 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
   void dispose() {
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
+    _scheduledSearchDebounce?.cancel();
+    _scheduledSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -55,6 +65,119 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     _searchDebounce?.cancel();
     setState(() { _query = ''; _searchCtrl.clear(); });
     ref.read(productsPod.notifier).fetchProducts(filters: _filters);
+  }
+
+  void _onScheduledSearchChanged(String v) {
+    setState(() => _scheduledQuery = v);
+    _scheduledSearchDebounce?.cancel();
+    _scheduledSearchDebounce = Timer(const Duration(milliseconds: 400), () {
+      ref.read(productsPod.notifier).fetchScheduledProducts(query: _scheduledQuery);
+    });
+  }
+
+  void _clearScheduledSearch() {
+    _scheduledSearchDebounce?.cancel();
+    setState(() { _scheduledQuery = ''; _scheduledSearchCtrl.clear(); });
+    ref.read(productsPod.notifier).fetchScheduledProducts();
+  }
+
+  // ── Scheduled tab: reschedule bottom sheet ──────────────────────────────
+
+  Future<void> _pickScheduledDateTime({DateTime? initial}) async {
+    final now  = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial != null && initial.isAfter(now) ? initial : now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial ?? now.add(const Duration(hours: 1))),
+    );
+    if (time == null) return;
+    final scheduledAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    if (scheduledAt.isBefore(DateTime.now())) {
+      if (!mounted) return;
+      AppToast.show(context, message: 'Pick a future date and time', type: ToastType.error);
+      return;
+    }
+    _lastPickedScheduledAt = scheduledAt;
+  }
+
+  DateTime? _lastPickedScheduledAt;
+
+  Future<void> _onRescheduleOne(String id, DateTime? current) async {
+    HapticUtils.light();
+    await _pickScheduledDateTime(initial: current);
+    final picked = _lastPickedScheduledAt;
+    _lastPickedScheduledAt = null;
+    if (picked == null) return;
+    final ok = await ref.read(productsPod.notifier).scheduleProduct(id, picked);
+    if (!mounted) return;
+    AppToast.show(context,
+        message: ok ? 'Product rescheduled' : (ref.read(productsPod).error ?? 'Could not reschedule'),
+        type: ok ? ToastType.success : ToastType.error);
+  }
+
+  Future<void> _onBulkReschedule() async {
+    HapticUtils.medium();
+    await _pickScheduledDateTime();
+    final picked = _lastPickedScheduledAt;
+    _lastPickedScheduledAt = null;
+    if (picked == null) return;
+    await ref.read(productsPod.notifier).bulkReschedule(picked);
+    if (!mounted) return;
+    AppToast.show(context, message: 'Products rescheduled', type: ToastType.success);
+  }
+
+  Future<void> _onPublishNowOne(String id) async {
+    HapticUtils.medium();
+    final confirmed = await showConfirmModal(
+      context,
+      title: 'Publish Now',
+      message: 'This product will go live immediately instead of at its scheduled time.',
+      confirmLabel: 'Publish',
+    );
+    if (!confirmed) return;
+    final ok = await ref.read(productsPod.notifier).publishScheduledProductNow(id);
+    if (!mounted) return;
+    AppToast.show(context,
+        message: ok ? 'Product published' : (ref.read(productsPod).error ?? 'Could not publish product'),
+        type: ok ? ToastType.success : ToastType.error);
+  }
+
+  Future<void> _onBulkPublishNow() async {
+    HapticUtils.medium();
+    final count = ref.read(productsPod).selectedScheduledIds.length;
+    final confirmed = await showConfirmModal(
+      context,
+      title: 'Publish Now',
+      message: '$count selected product${count > 1 ? 's' : ''} will go live immediately.',
+      confirmLabel: 'Publish',
+    );
+    if (!confirmed) return;
+    await ref.read(productsPod.notifier).bulkPublishNow();
+    if (!mounted) return;
+    AppToast.show(context, message: 'Products published', type: ToastType.success);
+  }
+
+  Future<void> _onDeleteScheduled(String id) async {
+    HapticUtils.medium();
+    final confirmed = await showConfirmModal(
+      context,
+      title: 'Delete Product',
+      message: 'This will permanently remove the product.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!confirmed) return;
+    final ok = await ref.read(productsPod.notifier).deleteProduct(id);
+    if (!mounted) return;
+    AppToast.show(context,
+        message: ok ? 'Product deleted' : (ref.read(productsPod).error ?? 'Cannot delete product'),
+        type: ok ? ToastType.success : ToastType.error);
   }
 
   // ── Add-product choice modal ──────────────────────────────────────────────
@@ -276,6 +399,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
         .where((p) => _stockOf(p) <= 5 && (p['isActive'] as bool? ?? true))
         .length;
     final activeFilterCount = _filters.activeCount + (_query.isNotEmpty ? 1 : 0);
+    final hPad = Responsive.horizontalPadding(context);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -291,7 +415,7 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
           children: [
             // ── Header ───────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 0),
               child: Row(
                 children: [
                   const Text(
@@ -347,12 +471,26 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               ),
             ),
 
+            const SizedBox(height: 14),
+
+            // ── Tab bar: Market / Traffic sources / Viewers ─────────────────
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: hPad),
+              child: _ProductsTabBar(
+                active: state.activeTab,
+                onChanged: (tab) {
+                  HapticUtils.light();
+                  ref.read(productsPod.notifier).setTab(tab);
+                },
+              ),
+            ).animate().fadeIn(delay: 90.ms),
+
             const SizedBox(height: 16),
 
             // ── Low-stock banner ──────────────────────────────────────────
-            if (lowStockCount > 0 && _filters.stock != ProductStockFilter.lowStock)
+            if (state.activeTab == ProductsTab.released && lowStockCount > 0 && _filters.stock != ProductStockFilter.lowStock)
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 12),
                 child: GestureDetector(
                   onTap: () {
                     HapticUtils.light();
@@ -382,8 +520,9 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               ),
 
             // ── Search bar ────────────────────────────────────────────────
+            if (state.activeTab == ProductsTab.released)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: EdgeInsets.symmetric(horizontal: hPad),
               child: TextField(
                 controller: _searchCtrl,
                 onChanged: _onSearchChanged,
@@ -408,14 +547,42 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               ),
             ).animate().fadeIn(delay: 80.ms),
 
+            // ── Search bar (Scheduled tab) ──────────────────────────────────
+            if (state.activeTab == ProductsTab.scheduled)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: hPad),
+              child: TextField(
+                controller: _scheduledSearchCtrl,
+                onChanged: _onScheduledSearchChanged,
+                style: const TextStyle(color: AppColors.white, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Search product',
+                  hintStyle: const TextStyle(color: AppColors.greyDark, fontSize: 14),
+                  prefixIcon: const Icon(Icons.search_rounded, color: AppColors.grey, size: 20),
+                  suffixIcon: _scheduledQuery.isNotEmpty
+                      ? GestureDetector(
+                          onTap: _clearScheduledSearch,
+                          child: const Icon(Icons.close_rounded, color: AppColors.grey, size: 18),
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.white, width: 1.5)),
+                ),
+              ),
+            ).animate().fadeIn(delay: 80.ms),
+
             // ── Active filter chips ───────────────────────────────────────
-            if (_filters.hasActiveFilters) ...[
+            if (state.activeTab == ProductsTab.released && _filters.hasActiveFilters) ...[
               const SizedBox(height: 10),
               SizedBox(
                 height: 30,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: EdgeInsets.symmetric(horizontal: hPad),
                   children: [
                     _ActiveChip(
                       label: 'Clear all',
@@ -473,104 +640,376 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
 
             // ── List ──────────────────────────────────────────────────────
             Expanded(
-              child: state.isLoading
-                  ? GridView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.66,
-                      ),
-                      itemCount: 8,
-                      itemBuilder: (_, __) => const ProductCardShimmer(),
-                    )
-                  : state.error != null && products.isEmpty
-                      ? _ErrorRetry(
-                          message: state.error!,
-                          onRetry: () => ref.read(productsPod.notifier).fetchProducts(filters: _filters, query: _query),
-                        )
-                      : products.isEmpty
-                          ? _EmptyProducts(
-                              hasFilters: activeFilterCount > 0,
-                              onClear: () {
-                                _searchDebounce?.cancel();
-                                setState(() {
-                                  _filters = ProductFilterParams.defaults;
-                                  _query   = '';
-                                  _searchCtrl.clear();
-                                });
-                                ref.read(productsPod.notifier).fetchProducts();
-                              },
+              child: state.activeTab == ProductsTab.scheduled
+                  ? _buildScheduledTab(context, state)
+                  : state.activeTab != ProductsTab.released
+                  ? (state.activeTab == ProductsTab.trafficSources
+                      ? _TrafficSourcesTab(state: state)
+                      : _ViewersTab(state: state))
+                  : state.isLoading
+                      ? _buildLoadingSkeleton(context)
+                      : state.error != null && products.isEmpty
+                          ? _ErrorRetry(
+                              message: state.error!,
+                              onRetry: () => ref.read(productsPod.notifier).fetchProducts(filters: _filters, query: _query),
                             )
-                          : RefreshIndicator(
-                              onRefresh: () async {
-                                HapticUtils.light();
-                                await ref.read(productsPod.notifier).fetchProducts(filters: _filters, query: _query);
-                              },
-                              color: AppColors.white,
-                              backgroundColor: AppColors.surface,
-                              child: GridView.builder(
-                                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 2,
-                                  mainAxisSpacing: 12,
-                                  crossAxisSpacing: 12,
-                                  childAspectRatio: 0.66,
-                                ),
-                                itemCount: products.length,
-                                itemBuilder: (_, i) => _ProductCard(
-                                  product: products[i] as Map,
-                                  index: i,
-                                  onEdit: () => Navigator.push(context, MaterialPageRoute(
-                                    builder: (_) => EditProductScreen(
-                                      productId: products[i]['id'] as String? ?? '',
+                          : products.isEmpty
+                              ? _EmptyProducts(
+                                  hasFilters: activeFilterCount > 0,
+                                  onClear: () {
+                                    _searchDebounce?.cancel();
+                                    setState(() {
+                                      _filters = ProductFilterParams.defaults;
+                                      _query   = '';
+                                      _searchCtrl.clear();
+                                    });
+                                    ref.read(productsPod.notifier).fetchProducts();
+                                  },
+                                )
+                              : Column(
+                                  children: [
+                                    if (state.selectedIds.isNotEmpty)
+                                      _BulkActionBar(state: state),
+                                    Expanded(
+                                      child: RefreshIndicator(
+                                        onRefresh: () async {
+                                          HapticUtils.light();
+                                          await ref.read(productsPod.notifier).fetchProducts(filters: _filters, query: _query);
+                                        },
+                                        color: AppColors.white,
+                                        backgroundColor: AppColors.surface,
+                                        child: Responsive.isMobile(context)
+                                            ? _buildMobileList(context, products, state)
+                                            : _buildDesktopTable(context, products, state),
+                                      ),
                                     ),
-                                  )).then((_) => ref.read(productsPod.notifier).fetchProducts(filters: _filters)),
-                                  onShare: () => showShareProductSheet(context, products[i] as Map),
-                                  onDelete: () async {
-                                    HapticUtils.medium();
-                                    final confirmed = await showConfirmModal(
-                                      context,
-                                      title: 'Delete Product',
-                                      message: 'This will permanently remove the product. Orders linked to it will not be affected.',
-                                      confirmLabel: 'Delete',
-                                      destructive: true,
-                                    );
-                                    if (!confirmed || !context.mounted) return;
-                                    final ok = await ref.read(productsPod.notifier).deleteProduct(products[i]['id'] as String? ?? '');
-                                    if (!context.mounted) return;
-                                    AppToast.show(context,
-                                      message: ok ? 'Product deleted' : (ref.read(productsPod).error ?? 'Cannot delete product'),
-                                      type: ok ? ToastType.success : ToastType.error,
-                                    );
-                                  },
-                                  onToggleActive: () async {
-                                    HapticUtils.light();
-                                    final id       = products[i]['id'] as String? ?? '';
-                                    final isActive = products[i]['isActive'] as bool? ?? true;
-                                    final ok = await ref.read(productsPod.notifier).toggleActive(id);
-                                    if (!context.mounted) return;
-                                    if (ok) {
-                                      AppToast.show(context,
-                                        message: isActive ? 'Product deactivated' : 'Product activated',
-                                        type: ToastType.success,
-                                      );
-                                    } else {
-                                      AppToast.show(context,
-                                        message: ref.read(productsPod).error ?? 'Could not update product',
-                                        type: ToastType.error,
-                                      );
-                                    }
-                                  },
+                                  ],
                                 ),
-                              ),
-                            ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  // ── Market tab: loading skeleton (mirrors the real mobile-list / desktop-
+  // table shape so results don't jump-cut into a different layout) ────────
+
+  Widget _buildLoadingSkeleton(BuildContext context) {
+    final padding = Responsive.horizontalPadding(context);
+    if (Responsive.isMobile(context)) {
+      return ListView.separated(
+        padding: EdgeInsets.fromLTRB(padding, 0, padding, 20),
+        itemCount: 6,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, __) => const ProductListRowShimmer(),
+      );
+    }
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: padding),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          ProductTableHeader(
+            allSelected: false,
+            someSelected: false,
+            onSelectAllChanged: (_) {},
+          ),
+          ...List.generate(8, (_) => const ProductTableRowShimmer()),
+        ],
+      ),
+    );
+  }
+
+  // ── Market tab: mobile stacked card list ────────────────────────────────
+
+  Widget _buildMobileList(BuildContext context, List<dynamic> products, ProductsState state) {
+    final showLoadMore = state.hasMore && _query.isEmpty && !_filters.hasActiveFilters;
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      itemCount: products.length + (showLoadMore ? 1 : 0),
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) {
+        if (i >= products.length) {
+          return _LoadMoreButton(
+            isLoading: state.isLoadingMore,
+            onTap: () => ref.read(productsPod.notifier).fetchProducts(
+              filters: _filters, query: _query, page: state.currentPage + 1, append: true),
+          );
+        }
+        final p = products[i] as Map;
+        final id = p['id'] as String? ?? '';
+        return ProductListCard(
+          product: p,
+          index: i,
+          onEdit: () => _onEdit(id),
+          onShare: () => showShareProductSheet(context, p),
+          onDelete: () => _onDelete(id),
+          onToggleActive: () => _onToggleActive(id, p['isActive'] as bool? ?? true),
+        );
+      },
+    );
+  }
+
+  // ── Market tab: desktop/tablet table ────────────────────────────────────
+
+  Widget _buildDesktopTable(BuildContext context, List<dynamic> products, ProductsState state) {
+    final ids = products.map((p) => (p as Map)['id'] as String? ?? '').where((id) => id.isNotEmpty).toList();
+    final allSelected  = ids.isNotEmpty && ids.every(state.selectedIds.contains);
+    final someSelected = ids.any(state.selectedIds.contains);
+    final showLoadMore = state.hasMore && _query.isEmpty && !_filters.hasActiveFilters;
+
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: Responsive.horizontalPadding(context)),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          ProductTableHeader(
+            allSelected: allSelected,
+            someSelected: someSelected,
+            onSelectAllChanged: (_) {
+              if (allSelected) {
+                ref.read(productsPod.notifier).clearSelection();
+              } else {
+                ref.read(productsPod.notifier).selectAll(ids);
+              }
+            },
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: products.length + (showLoadMore ? 1 : 0),
+              itemBuilder: (_, i) {
+                if (i >= products.length) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: _LoadMoreButton(
+                      isLoading: state.isLoadingMore,
+                      onTap: () => ref.read(productsPod.notifier).fetchProducts(
+                        filters: _filters, query: _query, page: state.currentPage + 1, append: true),
+                    ),
+                  );
+                }
+                final p = products[i] as Map;
+                final id = p['id'] as String? ?? '';
+                return ProductTableRow(
+                  product: p,
+                  index: i,
+                  selected: state.selectedIds.contains(id),
+                  onToggleSelect: () => ref.read(productsPod.notifier).toggleSelected(id),
+                  onEdit: () => _onEdit(id),
+                  onShare: () => showShareProductSheet(context, p),
+                  onDelete: () => _onDelete(id),
+                  onToggleActive: () => _onToggleActive(id, p['isActive'] as bool? ?? true),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Scheduled tab ────────────────────────────────────────────────────────
+
+  Widget _buildScheduledTab(BuildContext context, ProductsState state) {
+    if (state.isLoadingScheduled && state.scheduledProducts.isEmpty) {
+      return _buildLoadingSkeleton(context);
+    }
+    if (state.scheduledProducts.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80, height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: const Icon(Icons.schedule_rounded, color: AppColors.greyDark, size: 36),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _scheduledQuery.isNotEmpty
+                    ? 'No scheduled products match your search'
+                    : 'No products scheduled.\nFinish a listing and schedule it to publish later.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.grey, fontSize: 14, height: 1.5),
+              ),
+            ],
+          ),
+        ).animate().fadeIn().scale(begin: const Offset(0.9, 0.9)),
+      );
+    }
+    return Column(
+      children: [
+        if (state.selectedScheduledIds.isNotEmpty) _ScheduledBulkActionBar(
+          count: state.selectedScheduledIds.length,
+          onReschedule: _onBulkReschedule,
+          onPublishNow: _onBulkPublishNow,
+          onClear: () => ref.read(productsPod.notifier).clearScheduledSelection(),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async {
+              HapticUtils.light();
+              await ref.read(productsPod.notifier).fetchScheduledProducts(query: _scheduledQuery);
+            },
+            color: AppColors.white,
+            backgroundColor: AppColors.surface,
+            child: Responsive.isMobile(context)
+                ? _buildScheduledMobileList(context, state)
+                : _buildScheduledDesktopTable(context, state),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScheduledMobileList(BuildContext context, ProductsState state) {
+    final products = state.scheduledProducts;
+    final showLoadMore = state.scheduledHasMore && _scheduledQuery.isEmpty;
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      itemCount: products.length + (showLoadMore ? 1 : 0),
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) {
+        if (i >= products.length) {
+          return _LoadMoreButton(
+            isLoading: state.isLoadingMoreScheduled,
+            onTap: () => ref.read(productsPod.notifier).fetchScheduledProducts(
+              query: _scheduledQuery, page: state.scheduledCurrentPage + 1, append: true),
+          );
+        }
+        final p = products[i] as Map;
+        final id = p['id'] as String? ?? '';
+        return ScheduledProductCard(
+          product: p,
+          index: i,
+          selected: state.selectedScheduledIds.contains(id),
+          onToggleSelect: () => ref.read(productsPod.notifier).toggleScheduledSelected(id),
+          onEdit: () => _onEdit(id),
+          onReschedule: () => _onRescheduleOne(id, _dateOfField(p['scheduledAt'])),
+          onPublishNow: () => _onPublishNowOne(id),
+          onDelete: () => _onDeleteScheduled(id),
+        );
+      },
+    );
+  }
+
+  Widget _buildScheduledDesktopTable(BuildContext context, ProductsState state) {
+    final products = state.scheduledProducts;
+    final ids = products.map((p) => (p as Map)['id'] as String? ?? '').where((id) => id.isNotEmpty).toList();
+    final allSelected  = ids.isNotEmpty && ids.every(state.selectedScheduledIds.contains);
+    final someSelected = ids.any(state.selectedScheduledIds.contains);
+    final showLoadMore = state.scheduledHasMore && _scheduledQuery.isEmpty;
+
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: Responsive.horizontalPadding(context)),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          ScheduledProductTableHeader(
+            allSelected: allSelected,
+            someSelected: someSelected,
+            onSelectAllChanged: (_) {
+              if (allSelected) {
+                ref.read(productsPod.notifier).clearScheduledSelection();
+              } else {
+                ref.read(productsPod.notifier).selectAllScheduled(ids);
+              }
+            },
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: products.length + (showLoadMore ? 1 : 0),
+              itemBuilder: (_, i) {
+                if (i >= products.length) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: _LoadMoreButton(
+                      isLoading: state.isLoadingMoreScheduled,
+                      onTap: () => ref.read(productsPod.notifier).fetchScheduledProducts(
+                        query: _scheduledQuery, page: state.scheduledCurrentPage + 1, append: true),
+                    ),
+                  );
+                }
+                final p = products[i] as Map;
+                final id = p['id'] as String? ?? '';
+                return ScheduledProductTableRow(
+                  product: p,
+                  index: i,
+                  selected: state.selectedScheduledIds.contains(id),
+                  onToggleSelect: () => ref.read(productsPod.notifier).toggleScheduledSelected(id),
+                  onEdit: () => _onEdit(id),
+                  onReschedule: () => _onRescheduleOne(id, _dateOfField(p['scheduledAt'])),
+                  onPublishNow: () => _onPublishNowOne(id),
+                  onDelete: () => _onDeleteScheduled(id),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  DateTime? _dateOfField(dynamic v) => v == null ? null : DateTime.tryParse(v.toString())?.toLocal();
+
+  // ── Shared row action callbacks (used by both mobile card & desktop row) ─
+
+  void _onEdit(String id) {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => EditProductScreen(productId: id),
+    )).then((_) => ref.read(productsPod.notifier).fetchProducts(filters: _filters));
+  }
+
+  Future<void> _onDelete(String id) async {
+    HapticUtils.medium();
+    final confirmed = await showConfirmModal(
+      context,
+      title: 'Delete Product',
+      message: 'This will permanently remove the product. Orders linked to it will not be affected.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!confirmed) return;
+    final ok      = await ref.read(productsPod.notifier).deleteProduct(id);
+    final message = ok ? 'Product deleted' : (ref.read(productsPod).error ?? 'Cannot delete product');
+    final type    = ok ? ToastType.success : ToastType.error;
+    if (!mounted) return;
+    AppToast.show(context, message: message, type: type);
+  }
+
+  Future<void> _onToggleActive(String id, bool isActive) async {
+    HapticUtils.light();
+    final ok      = await ref.read(productsPod.notifier).toggleActive(id);
+    final message = ok
+        ? (isActive ? 'Product deactivated' : 'Product activated')
+        : (ref.read(productsPod).error ?? 'Could not update product');
+    final type    = ok ? ToastType.success : ToastType.error;
+    if (!mounted) return;
+    AppToast.show(context, message: message, type: type);
   }
 
   PageRoute<dynamic> _slideRoute(Widget page) => PageRouteBuilder(
@@ -644,6 +1083,317 @@ class _ActiveChip extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Products tab bar (Market / Traffic sources / Viewers) ──────────────────────
+
+class _ProductsTabBar extends StatelessWidget {
+  final ProductsTab active;
+  final ValueChanged<ProductsTab> onChanged;
+  const _ProductsTabBar({required this.active, required this.onChanged});
+
+  static const _labels = {
+    ProductsTab.released:       'Released',
+    ProductsTab.scheduled:      'Scheduled',
+    ProductsTab.trafficSources: 'Traffic sources',
+    ProductsTab.viewers:        'Viewers',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: ProductsTab.values.map((tab) {
+          final selected = tab == active;
+          return GestureDetector(
+            onTap: () => onChanged(tab),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+              decoration: BoxDecoration(
+                color: selected ? AppColors.white : AppColors.surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: selected ? AppColors.white : AppColors.border),
+              ),
+              child: Text(
+                _labels[tab]!,
+                style: TextStyle(
+                  color: selected ? AppColors.bg : AppColors.grey,
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ── Bulk action bar (shown when Market table rows are selected) ────────────────
+
+class _BulkActionBar extends ConsumerWidget {
+  final ProductsState state;
+  const _BulkActionBar({required this.state});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = state.selectedIds.length;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Text('$count selected', style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          TextButton(
+            onPressed: () async {
+              HapticUtils.light();
+              await ref.read(productsPod.notifier).bulkToggleActive(true);
+            },
+            child: const Text('Activate', style: TextStyle(color: AppColors.success, fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          TextButton(
+            onPressed: () async {
+              HapticUtils.light();
+              await ref.read(productsPod.notifier).bulkToggleActive(false);
+            },
+            child: const Text('Deactivate', style: TextStyle(color: AppColors.warning, fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          TextButton(
+            onPressed: () async {
+              HapticUtils.medium();
+              final confirmed = await showConfirmModal(
+                context,
+                title: 'Delete Products',
+                message: 'This will permanently remove $count selected product${count > 1 ? 's' : ''}.',
+                confirmLabel: 'Delete',
+                destructive: true,
+              );
+              if (!confirmed) return;
+              await ref.read(productsPod.notifier).bulkDelete();
+            },
+            child: const Text('Delete', style: TextStyle(color: AppColors.error, fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          TextButton(
+            onPressed: () => ref.read(productsPod.notifier).clearSelection(),
+            child: const Text('Clear', style: TextStyle(color: AppColors.grey, fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Scheduled bulk action bar (Reschedule / Publish now) ───────────────────────
+
+class _ScheduledBulkActionBar extends StatelessWidget {
+  final int count;
+  final VoidCallback onReschedule;
+  final VoidCallback onPublishNow;
+  final VoidCallback onClear;
+  const _ScheduledBulkActionBar({
+    required this.count,
+    required this.onReschedule,
+    required this.onPublishNow,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          Text('$count selected', style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          TextButton.icon(
+            onPressed: onReschedule,
+            icon: const Icon(Icons.event_repeat_rounded, color: AppColors.info, size: 15),
+            label: const Text('Reschedule', style: TextStyle(color: AppColors.info, fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          FilledButton.icon(
+            onPressed: onPublishNow,
+            icon: const Icon(Icons.publish_rounded, size: 15),
+            label: const Text('Publish now', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.white,
+              foregroundColor: AppColors.bg,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+          TextButton(
+            onPressed: onClear,
+            child: const Text('Clear', style: TextStyle(color: AppColors.grey, fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Load more control ───────────────────────────────────────────────────────────
+
+class _LoadMoreButton extends StatelessWidget {
+  final bool isLoading;
+  final VoidCallback onTap;
+  const _LoadMoreButton({required this.isLoading, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: GestureDetector(
+        onTap: isLoading ? null : onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: isLoading
+              ? const SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.grey),
+                )
+              : const Text('Load more', style: TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Traffic sources tab ───────────────────────────────────────────────────────
+
+class _TrafficSourcesTab extends StatelessWidget {
+  final ProductsState state;
+  const _TrafficSourcesTab({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.isLoadingTrafficSources && state.trafficSources.isEmpty) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.grey));
+    }
+    if (state.trafficSources.isEmpty) {
+      return const Center(
+        child: Text('No traffic source data yet', style: TextStyle(color: AppColors.grey, fontSize: 13)),
+      );
+    }
+    final entries = state.trafficSources.cast<Map>();
+    final maxCount = entries
+        .map((e) => (e['count'] as num?) ?? 0)
+        .fold<num>(0, (a, b) => a > b ? a : b)
+        .toDouble()
+        .clamp(1.0, double.infinity);
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      itemCount: entries.length,
+      itemBuilder: (_, i) {
+        final e      = entries[i];
+        final source = e['source']?.toString() ?? 'Unknown';
+        final count  = (e['count'] as num?)?.toDouble() ?? 0;
+        final pct    = (count / maxCount).clamp(0.0, 1.0);
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: Text(source, style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w600))),
+                  Text(count.toInt().toString(), style: const TextStyle(color: AppColors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: pct,
+                  backgroundColor: AppColors.surface2,
+                  valueColor: const AlwaysStoppedAnimation<Color>(AppColors.info),
+                  minHeight: 6,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Viewers tab ────────────────────────────────────────────────────────────────
+
+class _ViewersTab extends StatelessWidget {
+  final ProductsState state;
+  const _ViewersTab({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.isLoadingViewers && state.viewers.isEmpty) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.grey));
+    }
+    if (state.viewers.isEmpty) {
+      return const Center(
+        child: Text('No viewer data yet', style: TextStyle(color: AppColors.grey, fontSize: 13)),
+      );
+    }
+    final entries = state.viewers.cast<Map>();
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      itemCount: entries.length,
+      itemBuilder: (_, i) {
+        final e       = entries[i];
+        final name    = e['productName']?.toString() ?? 'Product';
+        final viewers = (e['viewerCount'] as num?)?.toInt() ?? 0;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 30, height: 30,
+                decoration: BoxDecoration(color: AppColors.surface2, borderRadius: BorderRadius.circular(8)),
+                child: const Icon(Icons.visibility_rounded, color: AppColors.grey, size: 15),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w600))),
+              Text('$viewers viewers', style: const TextStyle(color: AppColors.grey, fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -976,197 +1726,6 @@ class _PriceField extends StatelessWidget {
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.white, width: 1.5)),
       ),
     );
-  }
-}
-
-// ── Product card ──────────────────────────────────────────────────────────────
-
-class _ProductCard extends StatelessWidget {
-  final Map product;
-  final int index;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final VoidCallback onToggleActive;
-  final VoidCallback onShare;
-
-  const _ProductCard({
-    required this.product,
-    required this.index,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onToggleActive,
-    required this.onShare,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final name     = product['name'] as String? ?? 'Product';
-    final priceRaw = product['price'];
-    final priceNum = priceRaw is num
-        ? priceRaw.toDouble()
-        : double.tryParse(priceRaw?.toString() ?? '') ?? 0.0;
-    final priceStr = priceNum == priceNum.truncateToDouble()
-        ? priceNum.toInt().toString()
-        : priceNum.toStringAsFixed(2);
-    final stockRaw = product['stock'];
-    final stock    = stockRaw is num
-        ? stockRaw.toInt()
-        : int.tryParse(stockRaw?.toString() ?? '') ?? 0;
-    final imageUrl  = product['imageUrl'] as String? ?? '';
-    final isActive  = product['isActive'] as bool? ?? true;
-    final brand     = product['brand']        as String?;
-    final category  = product['categoryName'] as String?;
-    final discount  = product['discountPercent'] as num?;
-    final rating    = product['rating'] as num?;
-    final subtitle  = [if (brand != null) brand, if (category != null) category].join(' · ');
-
-    final stockColor = stock > 10
-        ? AppColors.success
-        : stock > 0
-            ? AppColors.warning
-            : AppColors.error;
-
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Image ──────────────────────────────────────────────
-          Stack(
-            children: [
-              AspectRatio(
-                aspectRatio: 1,
-                child: Container(
-                  color: AppColors.surface2,
-                  child: imageUrl.isNotEmpty
-                      ? Image.network(imageUrl, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.image_rounded, color: AppColors.greyDark, size: 28))
-                      : const Icon(Icons.inventory_2_rounded, color: AppColors.greyDark, size: 28),
-                ),
-              ),
-              if (!isActive)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black.withOpacity(0.55),
-                    alignment: Alignment.center,
-                    child: const Text('INACTIVE',
-                        style: TextStyle(color: AppColors.white, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1)),
-                  ),
-                ),
-              if (discount != null && discount > 0)
-                Positioned(
-                  top: 8, left: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.success,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text('${discount.toInt()}% OFF',
-                        style: const TextStyle(color: AppColors.bg, fontSize: 10, fontWeight: FontWeight.w800)),
-                  ),
-                ),
-              Positioned(
-                top: 4, right: 4,
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: onShare,
-                      child: Container(
-                        padding: const EdgeInsets.all(5),
-                        decoration: BoxDecoration(
-                          color: AppColors.bg.withOpacity(0.55),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.ios_share_rounded, color: AppColors.white, size: 15),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.bg.withOpacity(0.55),
-                        shape: BoxShape.circle,
-                      ),
-                      child: PopupMenuButton<String>(
-                        color: AppColors.surface2,
-                        padding: EdgeInsets.zero,
-                        icon: const Icon(Icons.more_vert_rounded, color: AppColors.white, size: 18),
-                        onSelected: (v) {
-                          if (v == 'edit')   onEdit();
-                          if (v == 'delete') onDelete();
-                          if (v == 'toggle') onToggleActive();
-                        },
-                        itemBuilder: (_) => [
-                          const PopupMenuItem(value: 'edit', child: Text('Edit', style: TextStyle(color: AppColors.white))),
-                          PopupMenuItem(
-                            value: 'toggle',
-                            child: Text(
-                              isActive ? 'Deactivate' : 'Activate',
-                              style: TextStyle(color: isActive ? AppColors.warning : AppColors.success),
-                            ),
-                          ),
-                          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppColors.error))),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          // ── Details ────────────────────────────────────────────
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.white, fontSize: 13, fontWeight: FontWeight.w700)),
-                  if (subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.grey, fontSize: 11)),
-                  ],
-                  const Spacer(),
-                  Row(
-                    children: [
-                      Text('₹$priceStr', style: const TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w800)),
-                      if (rating != null && rating > 0) ...[
-                        const Spacer(),
-                        const Icon(Icons.star_rounded, color: AppColors.warning, size: 13),
-                        const SizedBox(width: 2),
-                        Text(rating.toStringAsFixed(1), style: const TextStyle(color: AppColors.grey, fontSize: 11)),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        width: 6, height: 6,
-                        decoration: BoxDecoration(color: stockColor, shape: BoxShape.circle),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        stock > 0 ? '$stock in stock' : 'Out of stock',
-                        style: TextStyle(color: stockColor, fontSize: 10.5, fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    ).animate().fadeIn(delay: Duration(milliseconds: index * 40)).slideY(begin: 0.04, end: 0);
   }
 }
 

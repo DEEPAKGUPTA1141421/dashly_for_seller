@@ -12,6 +12,7 @@ class NotificationsState {
   final int unreadCount;
   final bool hasMore;
   final int currentPage;
+  final String? categoryFilter;
 
   const NotificationsState({
     this.isLoading     = false,
@@ -21,6 +22,7 @@ class NotificationsState {
     this.unreadCount   = 0,
     this.hasMore       = true,
     this.currentPage   = 0,
+    this.categoryFilter,
   });
 
   NotificationsState copyWith({
@@ -31,14 +33,17 @@ class NotificationsState {
     int? unreadCount,
     bool? hasMore,
     int? currentPage,
+    String? categoryFilter,
+    bool clearCategoryFilter = false,
   }) => NotificationsState(
-    isLoading:     isLoading     ?? this.isLoading,
-    isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-    error:         error,
-    notifications: notifications ?? this.notifications,
-    unreadCount:   unreadCount   ?? this.unreadCount,
-    hasMore:       hasMore       ?? this.hasMore,
-    currentPage:   currentPage   ?? this.currentPage,
+    isLoading:      isLoading     ?? this.isLoading,
+    isLoadingMore:  isLoadingMore ?? this.isLoadingMore,
+    error:          error,
+    notifications:  notifications ?? this.notifications,
+    unreadCount:    unreadCount   ?? this.unreadCount,
+    hasMore:        hasMore       ?? this.hasMore,
+    currentPage:    currentPage   ?? this.currentPage,
+    categoryFilter: clearCategoryFilter ? null : (categoryFilter ?? this.categoryFilter),
   );
 }
 
@@ -49,7 +54,7 @@ class NotificationsNotifier extends StateNotifier<NotificationsState> {
 
   static const int _pageSize = 20;
 
-  // GET /api/v1/users/notifications?page=0&size=20
+  // GET /api/v1/users/notifications?page=0&size=20&category=ORDER_UPDATES
   Future<void> fetchNotifications({bool reset = true}) async {
     if (reset) {
       state = state.copyWith(isLoading: true, error: null, currentPage: 0);
@@ -62,12 +67,16 @@ class NotificationsNotifier extends StateNotifier<NotificationsState> {
       final page = reset ? 0 : state.currentPage;
       final res  = await _client.get(
         ApiEndpoints.notifications,
-        queryParameters: {'page': page, 'size': _pageSize},
+        queryParameters: {
+          'page': page,
+          'size': _pageSize,
+          if (state.categoryFilter != null) 'category': state.categoryFilter,
+        },
       );
       final body  = res.data as Map<String, dynamic>;
       final data  = (body['data'] as Map<String, dynamic>?) ?? {};
       final list  = (data['notifications'] as List<dynamic>?) ?? (body['data'] is List ? body['data'] as List : []);
-      final total = (data['totalUnread'] as num?)?.toInt() ?? _countUnread(list);
+      final total = (data['unreadCount'] as num?)?.toInt() ?? _countUnread(list);
       final hasNext = list.length >= _pageSize;
 
       state = state.copyWith(
@@ -86,6 +95,47 @@ class NotificationsNotifier extends StateNotifier<NotificationsState> {
     } catch (e) {
       state = state.copyWith(isLoading: false, isLoadingMore: false, error: e.toString());
     }
+  }
+
+  /// Sets (or clears, if null) the active category filter and reloads the feed.
+  Future<void> setCategoryFilter(String? category) async {
+    state = state.copyWith(categoryFilter: category, clearCategoryFilter: category == null);
+    await fetchNotifications();
+  }
+
+  // GET /api/v1/users/notifications/unread-count
+  // Cheap bell-badge refresh — used on app resume / foreground push arrival,
+  // without paging through the full feed.
+  Future<void> fetchUnreadCount() async {
+    try {
+      final res  = await _client.get(ApiEndpoints.notificationUnreadCount);
+      final body = res.data as Map<String, dynamic>;
+      final data = (body['data'] as Map<String, dynamic>?) ?? {};
+      final count = (data['unreadCount'] as num?)?.toInt();
+      if (count != null) {
+        state = state.copyWith(unreadCount: count);
+      }
+    } catch (_) {}
+  }
+
+  /// Called by PushNotificationService when an FCM message arrives while the
+  /// app is in the foreground — bumps the badge and prepends the item to the
+  /// feed immediately, without waiting for the next fetch.
+  void receivePush(Map<String, dynamic> data) {
+    final notif = <String, dynamic>{
+      'id':          data['notificationId'] ?? data['id'],
+      'category':    data['category'],
+      'title':       data['title'],
+      'body':        data['body'],
+      'actionUrl':   data['actionUrl'] ?? data['click_action'],
+      'referenceId': data['referenceId'],
+      'read':        false,
+      'createdAt':   DateTime.now().toIso8601String(),
+    };
+    state = state.copyWith(
+      notifications: [notif, ...state.notifications],
+      unreadCount: state.unreadCount + 1,
+    );
   }
 
   // PATCH /api/v1/users/notifications/{id}/read

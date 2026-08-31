@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show File;
 import 'dart:math' show max;
 import 'dart:typed_data' show Uint8List;
 import 'package:dio/dio.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/api/api_client.dart';
 import '../core/api/api_endpoints.dart';
 import '../core/errors/app_exception.dart';
+import '../models/discount_config.dart';
 
 class AddProductState {
   final bool isLoading;
@@ -57,6 +59,10 @@ class AddProductState {
   final String stock;
   final String sku;
   final String weight;
+  // Seller-configured discount applied to newly-created SKUs when the
+  // Variants step submits to add-variants (per-combo overrides are held on
+  // that step's own local item state, not here — see VariantsStep).
+  final DiscountConfig? discount;
 
   // Set after create API call
   final String? createdProductId;
@@ -100,6 +106,7 @@ class AddProductState {
     this.stock           = '',
     this.sku             = '',
     this.weight          = '100g',
+    this.discount,
     this.createdProductId,
   });
 
@@ -131,6 +138,8 @@ class AddProductState {
     String? stock,
     String? sku,
     String? weight,
+    DiscountConfig? discount,
+    bool clearDiscount = false,
     String? createdProductId,
     bool? draftChecked,
     bool? hasDraft,
@@ -167,6 +176,7 @@ class AddProductState {
       stock:            stock            ?? this.stock,
       sku:              sku              ?? this.sku,
       weight:           weight           ?? this.weight,
+      discount:         clearDiscount ? null : (discount ?? this.discount),
       createdProductId: createdProductId ?? this.createdProductId,
     );
   }
@@ -188,6 +198,10 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
   String? _savedAttrImagesJson;
   String? _savedBrandId;
   String? _savedTagsJson;
+  // Per-attribute value string ("Blue,Red") last confirmed saved to the
+  // backend — lets saveAttributesAndContinue send only the attributes whose
+  // value actually changed, instead of resending everything every time.
+  final Map<String, String> _savedAttrValueByAttr = {};
 
   // ── Init ─────────────────────────────────────────────────────────────────
   Future<void> init() async {
@@ -229,15 +243,17 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
 
     // ── Step mapping ─────────────────────────────────────────────────────────
     // Each enum value represents "this step was the last one completed".
-    // We send the user to the NEXT step so they continue naturally.
+    // We send the user to the NEXT step so they continue naturally. Wizard
+    // step indices (see add_product_screen.dart): 0=Category 1=BasicInfo
+    // 2=Attributes 3=Variants 4=Images 5=TagsBrand 6=Review.
     // PRODUCT_BRAND_AND_TAGS = everything done → go to Review (step 6).
     final currentStepStr = data['currentStep']?.toString() ?? '';
     const stepMap = {
-      'PRODUCT_NAME':           1,
-      'PRODUCT_ATTRIBUTE':      2,
-      'PRODUCT_VARIANT':        3,
-      'PRODUCT_IMAGE':          4,
-      'PRODUCT_BRAND_AND_TAGS': 6,
+      'PRODUCT_NAME':           2, // basic info done      → next: Attributes
+      'PRODUCT_ATTRIBUTE':      3, // attributes done       → next: Variants
+      'PRODUCT_VARIANT':        4, // variants done         → next: Images
+      'PRODUCT_IMAGE':          5, // images done           → next: TagsBrand
+      'PRODUCT_BRAND_AND_TAGS': 6, // brand & tags done     → next: Review
     };
     final targetStep = stepMap[currentStepStr] ?? 1;
 
@@ -250,9 +266,13 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     final categoryName = (basicInfo['categoryName'] ?? data['categoryName'])?.toString() ?? '';
 
     // ── Attributes ────────────────────────────────────────────────────────────
-    // Response: { categoryAttributeId, value (string), isImageAttribute, ... }
+    // Response: { id, categoryAttributeId, value (string), isImageAttribute, ... }
+    // A variant attribute (e.g. Color) has one row PER selected value — merge
+    // them into the same comma-separated format the wizard UI uses instead of
+    // the last row silently overwriting the rest (was losing every value but
+    // the last one, e.g. "Blue" disappearing when "Red" was also selected).
     final attrsRaw        = data['attributes'] as List<dynamic>? ?? [];
-    final attributeValues = <String, String>{};
+    final attrValueSets    = <String, Set<String>>{}; // catAttrId → ordered set of values
     // Build value→categoryAttributeId index for image attributes (used for media mapping)
     final imageAttrIndex  = <String, String>{}; // attrValue → categoryAttributeId
 
@@ -261,12 +281,17 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       final catAttrId = attr['categoryAttributeId']?.toString() ?? '';
       final val       = attr['value']?.toString()              ?? '';
       if (catAttrId.isNotEmpty && val.isNotEmpty) {
-        attributeValues[catAttrId] = val;
+        (attrValueSets[catAttrId] ??= <String>{}).add(val);
         if (attr['isImageAttribute'] == true) {
           imageAttrIndex[val] = catAttrId;
         }
+        final prodAttrId = attr['id']?.toString();
+        if (prodAttrId != null && prodAttrId.isNotEmpty) {
+          _existingAttributeValueIds['$catAttrId::$val'] = prodAttrId;
+        }
       }
     }
+    final attributeValues = attrValueSets.map((k, v) => MapEntry(k, v.join(',')));
 
     // ── Variants ─────────────────────────────────────────────────────────────
     final variantsRaw = data['variants'] as List<dynamic>? ?? [];
@@ -315,6 +340,9 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     _savedName           = name;
     _savedDesc           = desc;
     _savedAttrValuesJson = jsonEncode(attributeValues);
+    _savedAttrValueByAttr
+      ..clear()
+      ..addAll(attributeValues);
     _savedVariantsJson   = jsonEncode(variants);
     _savedImagePathsJson = jsonEncode(coverImages);
     _savedAttrImagesJson = jsonEncode(attributeImages);
@@ -349,9 +377,14 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
   // can diff new combos against them (the add-variants endpoint is append-only).
   List<Map<String, dynamic>> _existingVariants = [];
 
-  // categoryAttributeId → existing productAttributeId, so saveAttributesAndContinue
-  // can UPDATE the existing row instead of creating a duplicate ProductAttribute.
-  Map<String, String> _existingAttributeIds = {};
+  // "{categoryAttributeId}::{value}" → existing productAttributeId, so
+  // saveAttributesAndContinue can UPDATE that specific row instead of
+  // creating a duplicate ProductAttribute — keyed per VALUE (not just per
+  // attribute) since a multi-value variant attribute like Color has one row
+  // per selected value, each with its own id. Populated from both the draft
+  // (resumeDraft) and live-edit (loadForEdit) load paths, and refreshed after
+  // every successful save so newly-created rows are known within the session.
+  final Map<String, String> _existingAttributeValueIds = {};
 
   Future<void> loadForEdit(String productId) async {
     state = state.copyWith(isLoading: true, error: null, isEditMode: true);
@@ -386,7 +419,6 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     final rawAttrs = (editData['attributes'] as List<dynamic>?) ?? [];
     final attributeValues = <String, String>{};
     final attributeImages = <String, List<String>>{};
-    final existingAttributeIds = <String, String>{};
     for (final a in rawAttrs) {
       final attr      = a as Map<String, dynamic>;
       final catAttrId = attr['categoryAttributeId']?.toString() ?? '';
@@ -399,8 +431,13 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       final existingVals = attributeValues[catAttrId]?.split(',').map((v) => v.trim()).toSet() ?? <String>{};
       existingVals.add(val);
       attributeValues[catAttrId] = existingVals.join(',');
+      // Keyed per VALUE (not just per attribute) — a multi-value attribute has
+      // one row per value, each with its own id; a single per-attribute id
+      // would silently apply to the wrong row on the next save.
       final prodAttrId = attr['productAttributeId']?.toString();
-      if (prodAttrId != null && prodAttrId.isNotEmpty) existingAttributeIds[catAttrId] = prodAttrId;
+      if (prodAttrId != null && prodAttrId.isNotEmpty) {
+        _existingAttributeValueIds['$catAttrId::$val'] = prodAttrId;
+      }
       if (attr['isImage'] == true) {
         final urls = (attr['images'] as List<dynamic>?)
             ?.map((u) => u.toString())
@@ -443,7 +480,6 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       }).toList();
     } catch (_) {}
     _existingVariants = variants;
-    _existingAttributeIds = existingAttributeIds;
 
     // Existing cover image
     final coverImages = <String>[];
@@ -467,6 +503,9 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     _savedName           = name;
     _savedDesc           = desc;
     _savedAttrValuesJson = jsonEncode(attributeValues);
+    _savedAttrValueByAttr
+      ..clear()
+      ..addAll(attributeValues);
     _savedVariantsJson   = jsonEncode(variants);
     _savedImagePathsJson = jsonEncode(coverImages);
     _savedAttrImagesJson = jsonEncode(attributeImages);
@@ -598,26 +637,55 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
         final prodAttrIds = <dynamic>[];
 
         values.forEach((attrId, rawValue) {
-          if (rawValue.trim().isEmpty) return;
-          final vals = rawValue.split(',').map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
+          final trimmed = rawValue.trim();
+          if (trimmed.isEmpty) return;
+          // Only send an attribute whose value actually changed since the last
+          // confirmed save — sending an unchanged attribute is harmless (its
+          // values resolve to their own existing ids below and just get
+          // re-set to the same value), but skipping it keeps the payload
+          // proportional to what the seller actually edited.
+          if (_savedAttrValueByAttr[attrId] == trimmed) return;
+
+          final vals = trimmed.split(',').map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
+          if (vals.isEmpty) return;
           catAttrIds.add(attrId);
           attrValues.add(vals);
-          // One entry per value (matches the backend's flat index) — reuse the
-          // existing row's id in edit mode so this UPDATEs instead of duplicating.
-          final existingId = state.isEditMode ? _existingAttributeIds[attrId] : null;
-          for (var i = 0; i < vals.length; i++) {
-            prodAttrIds.add(existingId);
+          // One entry per value (matches the backend's flat index) — each
+          // value gets its OWN existing id (not one id shared across every
+          // value of the attribute), so an already-saved value updates its
+          // own row and only a genuinely new value creates a new one.
+          for (final v in vals) {
+            prodAttrIds.add(_existingAttributeValueIds['$attrId::$v']);
           }
         });
 
         if (catAttrIds.isNotEmpty) {
-          await _client.post(ApiEndpoints.sellerProductCreateAttribute, data: {
+          final res = await _client.post(ApiEndpoints.sellerProductCreateAttribute, data: {
             'productId':           productId,
             'categoryAttributeId': catAttrIds,
             'values':              attrValues,
             'productAttributeIds': prodAttrIds,
             'step':                'PRODUCT_ATTRIBUTE',
           });
+
+          // Refresh the existing-id map from the response so a subsequent
+          // save within this same session already knows the ids of rows
+          // just created (and won't duplicate them) without needing a reload.
+          final body  = res.data as Map<String, dynamic>?;
+          final saved = (body?['data'] as List<dynamic>?) ?? [];
+          for (final row in saved) {
+            final m         = row as Map<String, dynamic>;
+            final savedAttr = m['categoryAttributeId']?.toString();
+            final savedVal  = m['value']?.toString();
+            final savedId   = m['id']?.toString();
+            if (savedAttr != null && savedVal != null && savedId != null) {
+              _existingAttributeValueIds['$savedAttr::$savedVal'] = savedId;
+            }
+          }
+
+          for (final attrId in catAttrIds) {
+            _savedAttrValueByAttr[attrId] = values[attrId]!.trim();
+          }
         }
       }
       _savedAttrValuesJson = valuesJson;
@@ -732,13 +800,42 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     );
   }
 
-  void removeMedia(int index) {
-    if (index < 0 || index >= state.imagePaths.length) return;
-    final path    = state.imagePaths[index];
-    final updated = [...state.imagePaths]..removeAt(index);
+  /// Removes the cover media at [index]. If it's already uploaded (an http
+  /// URL), this first deletes it on the backend — DB row AND the Cloudinary
+  /// asset — and only drops it from local state once that succeeds; a
+  /// not-yet-uploaded local file is just dropped locally (nothing to clean
+  /// up server-side). Returns false (leaving state untouched) if the backend
+  /// call fails, so the caller can surface the error.
+  Future<bool> removeMedia(int index) async {
+    if (index < 0 || index >= state.imagePaths.length) return false;
+    final path = state.imagePaths[index];
+
+    if (path.startsWith('http')) {
+      final productId = state.createdProductId;
+      if (productId == null) return false;
+      try {
+        await _client.delete(ApiEndpoints.sellerProductMediaRemove, data: {
+          'productId': productId,
+          'purpose':   'cover',
+          'url':       path,
+        });
+      } on DioException catch (e) {
+        state = state.copyWith(error: AppException.fromDioError(e).message);
+        return false;
+      } catch (e) {
+        state = state.copyWith(error: e.toString());
+        return false;
+      }
+    }
+
+    final updated  = [...state.imagePaths]..removeAt(index);
     final newTypes = Map<String, String>.from(state.mediaTypes)..remove(path);
     final newBytes = Map<String, Uint8List>.from(state.mediaBytes)..remove(path);
     state = state.copyWith(imagePaths: updated, mediaTypes: newTypes, mediaBytes: newBytes);
+    // Keep the saved-snapshot in sync so a subsequent Continue doesn't think
+    // this removed item is still what's "already saved" and skip re-checking.
+    _savedImagePathsJson = jsonEncode(state.imagePaths);
+    return true;
   }
 
   // Add per-attribute-value media. Bytes required on web for upload.
@@ -755,70 +852,149 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
     );
   }
 
-  void removeAttributeMedia(String key, int index) {
-    final updated = Map<String, List<String>>.from(state.attributeImages);
-    final List<String> list = [...(updated[key] ?? <String>[])]..removeAt(index);
-    // clean up bytes/types for removed path
-    final removedPath = (updated[key] ?? <String>[])[index];
-    updated[key] = list;
+  /// Same as [removeMedia] but for one item in an attribute-value gallery.
+  Future<bool> removeAttributeMedia(String key, int index) async {
+    final list = state.attributeImages[key] ?? const <String>[];
+    if (index < 0 || index >= list.length) return false;
+    final removedPath = list[index];
+
+    if (removedPath.startsWith('http')) {
+      final productId = state.createdProductId;
+      if (productId == null) return false;
+      try {
+        await _client.delete(ApiEndpoints.sellerProductMediaRemove, data: {
+          'productId':     productId,
+          'purpose':       'attribute',
+          'attributeKey':  key,
+          'url':           removedPath,
+        });
+      } on DioException catch (e) {
+        state = state.copyWith(error: AppException.fromDioError(e).message);
+        return false;
+      } catch (e) {
+        state = state.copyWith(error: e.toString());
+        return false;
+      }
+    }
+
+    final updatedList = [...list]..removeAt(index);
+    final updatedMap  = Map<String, List<String>>.from(state.attributeImages)..[key] = updatedList;
     final newTypes = Map<String, String>.from(state.mediaTypes)..remove(removedPath);
     final newBytes = Map<String, Uint8List>.from(state.mediaBytes)..remove(removedPath);
     state = state.copyWith(
-      attributeImages: updated,
+      attributeImages: updatedMap,
       mediaTypes:      newTypes,
       mediaBytes:      newBytes,
     );
+    _savedAttrImagesJson = jsonEncode(state.attributeImages);
+    return true;
   }
 
-  // Upload ALL media – cover photos + per-attribute-value photos/videos.
+  // Client-side size guard — matches the backend defaults in
+  // application.properties (app.upload.max-image-bytes / max-video-bytes).
+  // This is a fast, friendly rejection before any network call; the backend
+  // independently re-validates the ACTUAL uploaded size in confirmMediaUpload
+  // and destroys the Cloudinary asset if a tampered client got past this.
+  static const int maxImageBytes = 5 * 1024 * 1024;  // 5MB
+  static const int maxVideoBytes = 50 * 1024 * 1024; // 50MB
+
+  /// Client-side mirror of the backend's /media/status gate: a cover photo
+  /// or video, plus at least one image for every value of every
+  /// image-required attribute (e.g. one photo per selected Color). Used to
+  /// fail fast in the UI without a network round trip — the backend call in
+  /// uploadImagesAndContinue() is still the authoritative check, since local
+  /// state could in principle drift from what's actually saved.
+  List<String> missingMediaRequirements() {
+    final missing = <String>[];
+    if (state.imagePaths.isEmpty) missing.add('Cover photo or video');
+
+    for (final raw in state.attributes) {
+      final attr = raw as Map;
+      if (attr['isImageAttribute'] != true) continue;
+      final attrId = attr['id']?.toString() ?? attr['attributeId']?.toString() ?? '';
+      if (attrId.isEmpty) continue;
+      final values = (state.attributeValues[attrId] ?? '')
+          .split(',').map((v) => v.trim()).where((v) => v.isNotEmpty);
+      for (final v in values) {
+        final key = '$attrId::$v';
+        if ((state.attributeImages[key] ?? const <String>[]).isEmpty) {
+          missing.add('$v photo/video');
+        }
+      }
+    }
+    return missing;
+  }
+
+  // Upload ALL media – cover photos + per-attribute-value photos/videos —
+  // directly to Cloudinary via a short-lived, product-scoped signed URL.
+  // Raw file bytes never pass through this backend; only the resulting
+  // Cloudinary metadata (URL/public_id/byte count) is sent to it afterward.
   Future<bool> uploadImagesAndContinue() async {
+    // Fast, local fail — catches the common case (no cover picked at all)
+    // without a network round trip.
+    final localMissing = missingMediaRequirements();
+    if (localMissing.isNotEmpty) {
+      state = state.copyWith(error: 'Missing required media: ${localMissing.join(', ')}');
+      return false;
+    }
+
     final pathsJson    = jsonEncode(state.imagePaths);
     final attrImgJson  = jsonEncode(state.attributeImages);
-    if (state.createdProductId != null &&
+    final productId    = state.createdProductId;
+    final alreadySaved = productId != null &&
         pathsJson == _savedImagePathsJson &&
-        attrImgJson == _savedAttrImagesJson) {
-      state = state.copyWith(
-        currentStep: state.isEditMode ? 4 : 5, maxReachedStep: max(state.maxReachedStep, 5),
-      );
-      return true;
-    }
+        attrImgJson == _savedAttrImagesJson;
 
     state = state.copyWith(isCreating: true, error: null);
     try {
-      final productId = state.createdProductId;
-      if (productId != null) {
-        final coverFiles = await _buildFiles(state.imagePaths);
+      if (productId != null && !alreadySaved) {
+        // Cover — only the first path, and only when it's a fresh local file
+        // (an "http" path is already-uploaded CDN media from a prior save —
+        // that swap happens below, right after each successful upload, so a
+        // later call here never re-uploads something already on Cloudinary).
+        if (state.imagePaths.isNotEmpty && !state.imagePaths[0].startsWith('http')) {
+          final path = state.imagePaths[0];
+          final url  = await _uploadAndAttach(productId: productId, purpose: 'cover', path: path);
+          _markCoverUploaded(path, url);
+        }
 
-        final attrKeys  = <String>[];
-        final attrFiles = <MultipartFile>[];
-        for (final entry in state.attributeImages.entries) {
-          final files = await _buildFiles(entry.value);
-          for (final f in files) {
-            attrKeys.add(entry.key);
-            attrFiles.add(f);
+        for (final entry in state.attributeImages.entries.toList()) {
+          for (final path in List<String>.from(entry.value)) {
+            if (path.startsWith('http')) continue; // already on CDN, skip
+            final url = await _uploadAndAttach(
+              productId: productId,
+              purpose: 'attribute',
+              attributeKey: entry.key,
+              path: path,
+            );
+            _markAttributeImageUploaded(entry.key, path, url);
           }
         }
 
-        final hasAny = coverFiles.isNotEmpty || attrFiles.isNotEmpty;
-        if (hasAny) {
-          final formMap = <String, dynamic>{'productId': productId};
-          if (coverFiles.isNotEmpty) formMap['images']             = coverFiles;
-          if (attrFiles.isNotEmpty)  formMap['attributeImageKeys'] = attrKeys;
-          if (attrFiles.isNotEmpty)  formMap['attributeImages']    = attrFiles;
+        // Snapshot AFTER the loop, not the pre-upload paths captured above —
+        // local paths were swapped for CDN URLs as each upload succeeded, so
+        // this reflects what's actually now on Cloudinary.
+        _savedImagePathsJson = jsonEncode(state.imagePaths);
+        _savedAttrImagesJson = jsonEncode(state.attributeImages);
+      }
 
-          await _client.post(
-            ApiEndpoints.sellerProductUploadImages,
-            data: FormData.fromMap(formMap),
-            options: Options(
-              contentType:    'multipart/form-data',
-              sendTimeout:    null,
-              receiveTimeout: null,
-            ),
+      // Authoritative backend gate — re-checked every time, even when
+      // nothing new needed uploading, since an earlier removal could have
+      // made a previously-complete product incomplete again.
+      if (productId != null) {
+        final statusRes  = await _client.get(ApiEndpoints.sellerProductMediaStatus(productId));
+        final statusBody = statusRes.data as Map<String, dynamic>;
+        final statusData = statusBody['data'] as Map<String, dynamic>?;
+        if (statusData?['complete'] != true) {
+          final missing = ((statusData?['missing'] as List<dynamic>?) ?? []).join(', ');
+          state = state.copyWith(
+            isCreating: false,
+            error: missing.isNotEmpty ? 'Missing required media: $missing' : 'Please add the required product media',
           );
+          return false;
         }
       }
-      _savedImagePathsJson = pathsJson;
-      _savedAttrImagesJson = attrImgJson;
+
       state = state.copyWith(
         isCreating: false,
         currentStep: state.isEditMode ? 4 : 5,
@@ -829,29 +1005,108 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
       state = state.copyWith(isCreating: false, error: AppException.fromDioError(e).message);
       return false;
     } catch (e) {
-      state = state.copyWith(isCreating: false, error: e.toString());
+      state = state.copyWith(isCreating: false, error: e is AppException ? e.message : e.toString());
       return false;
     }
   }
 
-  // Build MultipartFile list — skips CDN URLs (already uploaded).
-  Future<List<MultipartFile>> _buildFiles(List<String> paths) async {
-    final files = <MultipartFile>[];
-    for (final path in paths) {
-      if (path.startsWith('http')) continue; // already on CDN, skip
-      final bytes    = state.mediaBytes[path];
-      final type     = state.mediaTypes[path] ?? 'image';
-      final mime     = type == 'video' ? 'video/mp4' : 'image/jpeg';
-      final filename = _filenameFromPath(path);
-      if (bytes != null && bytes.isNotEmpty) {
-        files.add(MultipartFile.fromBytes(bytes, filename: filename,
-            contentType: DioMediaType.parse(mime)));
-      } else if (!kIsWeb) {
-        files.add(MultipartFile.fromFileSync(path,
-            filename: path.split('/').last.split('\\').last));
-      }
+  /// One local media file → Cloudinary (direct, signed) → attach to the
+  /// product. Three hops: (1) ask this backend for a signature scoped to
+  /// this exact product+purpose, (2) upload straight to Cloudinary with a
+  /// bare Dio instance — the seller's auth token/interceptors never reach a
+  /// third-party host, (3) hand the resulting metadata back to this backend.
+  Future<String> _uploadAndAttach({
+    required String productId,
+    required String purpose, // 'cover' | 'attribute'
+    String? attributeKey,
+    required String path,
+  }) async {
+    final type     = state.mediaTypes[path] ?? 'image';
+    final isVideo  = type == 'video';
+    final resourceType = isVideo ? 'video' : 'image';
+
+    Uint8List? bytes = state.mediaBytes[path];
+    if (bytes == null && !kIsWeb) {
+      bytes = await File(path).readAsBytes();
     }
-    return files;
+    if (bytes == null || bytes.isEmpty) {
+      throw AppException(message: 'Could not read file to upload: $path');
+    }
+
+    final limit = isVideo ? maxVideoBytes : maxImageBytes;
+    if (bytes.length > limit) {
+      throw AppException(
+        message: '${isVideo ? "Video" : "Image"} exceeds the ${limit ~/ (1024 * 1024)}MB limit',
+      );
+    }
+
+    final sigRes = await _client.post(
+      ApiEndpoints.sellerProductMediaSignature(productId),
+      data: {
+        'purpose':      purpose,
+        if (attributeKey != null) 'attributeKey': attributeKey,
+        'resourceType': resourceType,
+      },
+    );
+    final sigBody = sigRes.data as Map<String, dynamic>;
+    final sig     = sigBody['data'] as Map<String, dynamic>;
+
+    final filename = _filenameFromPath(path);
+    final mime     = isVideo ? 'video/mp4' : 'image/jpeg';
+    final formData = FormData.fromMap({
+      'file':      MultipartFile.fromBytes(bytes, filename: filename, contentType: DioMediaType.parse(mime)),
+      'api_key':   sig['apiKey'].toString(),
+      'timestamp': sig['timestamp'].toString(),
+      'signature': sig['signature'].toString(),
+      'folder':    sig['folder'].toString(),
+      'public_id': sig['publicId'].toString(),
+    });
+    // A bare Dio — not the app's authenticated _client — since this request
+    // goes to Cloudinary, a third-party host, and must not carry the
+    // seller's bearer token or any of this app's interceptors.
+    final cloudinaryUrl = 'https://api.cloudinary.com/v1_1/${sig['cloudName']}/$resourceType/upload';
+    final uploadRes  = await Dio().post(cloudinaryUrl, data: formData);
+    final uploadBody = uploadRes.data as Map<String, dynamic>;
+
+    final secureUrl = uploadBody['secure_url'].toString();
+    await _client.post(ApiEndpoints.sellerProductMediaConfirm, data: {
+      'productId':    productId,
+      'purpose':      purpose,
+      if (attributeKey != null) 'attributeKey': attributeKey,
+      'publicId':     uploadBody['public_id'],
+      'secureUrl':    secureUrl,
+      'resourceType': resourceType,
+      'bytes':        uploadBody['bytes'] ?? bytes.length,
+    });
+    return secureUrl;
+  }
+
+  // Swaps a just-uploaded local cover path for its CDN URL in state, so a
+  // later uploadImagesAndContinue() call sees the "already on CDN" (http)
+  // check succeed instead of uploading the same file again.
+  void _markCoverUploaded(String oldPath, String newUrl) {
+    if (state.imagePaths.isEmpty || state.imagePaths[0] != oldPath) return;
+    final updatedPaths = [newUrl, ...state.imagePaths.skip(1)];
+    final newTypes = Map<String, String>.from(state.mediaTypes);
+    final t = newTypes.remove(oldPath);
+    if (t != null) newTypes[newUrl] = t;
+    final newBytes = Map<String, Uint8List>.from(state.mediaBytes)..remove(oldPath);
+    state = state.copyWith(imagePaths: updatedPaths, mediaTypes: newTypes, mediaBytes: newBytes);
+  }
+
+  // Same swap as above, but for one entry within a per-attribute-value gallery.
+  void _markAttributeImageUploaded(String key, String oldPath, String newUrl) {
+    final list = state.attributeImages[key];
+    if (list == null) return;
+    final idx = list.indexOf(oldPath);
+    if (idx == -1) return;
+    final updatedList = [...list]..[idx] = newUrl;
+    final updatedMap  = Map<String, List<String>>.from(state.attributeImages)..[key] = updatedList;
+    final newTypes = Map<String, String>.from(state.mediaTypes);
+    final t = newTypes.remove(oldPath);
+    if (t != null) newTypes[newUrl] = t;
+    final newBytes = Map<String, Uint8List>.from(state.mediaBytes)..remove(oldPath);
+    state = state.copyWith(attributeImages: updatedMap, mediaTypes: newTypes, mediaBytes: newBytes);
   }
 
   String _filenameFromPath(String path) {
@@ -931,14 +1186,19 @@ class AddProductNotifier extends StateNotifier<AddProductState> {
   }
 
   // ── Pricing (legacy – kept for PricingStep compatibility) ─────────────────
+  // [discount] is the seller-configured discount to apply to SKUs created via
+  // the Variants step's add-variants request (see saveVariantsAndContinue).
+  // Pass null to clear a previously-set discount.
   void savePricing({
     required String price,
     required String mrp,
     required String stock,
     required String sku,
     required String weight,
+    DiscountConfig? discount,
   }) => state = state.copyWith(
         price: price, mrp: mrp, stock: stock, sku: sku, weight: weight,
+        discount: discount, clearDiscount: discount == null,
       );
 
   // ── Navigation helpers ────────────────────────────────────────────────────

@@ -1,6 +1,10 @@
+import 'dart:io';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/api/api_client.dart';
@@ -121,22 +125,79 @@ class _ShareProductSheetState extends State<ShareProductSheet> {
     }
   }
 
+  static const List<String> _kTaglines = [
+    'Available now on Dashly. Grab yours today!',
+    'Shop it before it\'s gone — only on Dashly!',
+    'Fast delivery, trusted seller — on Dashly.',
+    'Found this on Dashly — you\'ll love it.',
+    'Get it delivered fast, only on Dashly.',
+  ];
+
   String get _name => widget.product['name'] as String? ?? 'Product';
 
-  String get _priceStr {
+  num get _price {
     final raw = widget.product['price'];
-    final num_ = raw is num ? raw : num.tryParse(raw?.toString() ?? '') ?? 0;
-    return num_ == num_.truncate() ? num_.toInt().toString() : num_.toStringAsFixed(2);
+    return raw is num ? raw : num.tryParse(raw?.toString() ?? '') ?? 0;
+  }
+
+  num? get _mrp {
+    final raw = widget.product['mrp'];
+    final v = raw is num ? raw : num.tryParse(raw?.toString() ?? '');
+    return (v != null && v > _price) ? v : null;
+  }
+
+  String _fmt(num n) => n == n.truncate() ? n.toInt().toString() : n.toStringAsFixed(2);
+
+  String get _priceStr => _fmt(_price);
+
+  int? get _discountPercent {
+    final mrp = _mrp;
+    if (mrp == null || mrp <= 0) return null;
+    return (((mrp - _price) / mrp) * 100).round();
   }
 
   String get _imageUrl => widget.product['imageUrl'] as String? ?? '';
 
   String get _brand => widget.product['brand'] as String? ?? '';
 
+  String get _category => widget.product['categoryName'] as String? ?? '';
+
+  String get _description => widget.product['description'] as String? ?? '';
+
+  int? get _stock {
+    final raw = widget.product['stock'];
+    return raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+  }
+
+  String get _tagline => _kTaglines[_name.hashCode.abs() % _kTaglines.length];
+
   String get _shareText {
+    final buffer = StringBuffer();
     final brandPart = _brand.isNotEmpty ? ' by $_brand' : '';
-    return 'Check out "$_name"$brandPart — ₹$_priceStr\n\n'
-        'Available now on Dashly. Grab yours today!';
+    buffer.writeln('🛍️ "$_name"$brandPart');
+    if (_category.isNotEmpty) buffer.writeln('Category: $_category');
+
+    final mrp = _mrp;
+    final discount = _discountPercent;
+    if (mrp != null && discount != null && discount > 0) {
+      buffer.writeln('₹$_priceStr  ($discount% OFF · MRP ₹${_fmt(mrp)})');
+    } else {
+      buffer.writeln('₹$_priceStr');
+    }
+
+    if (_description.isNotEmpty) {
+      final snippet = _description.length > 100 ? '${_description.substring(0, 100)}…' : _description;
+      buffer.writeln('\n$snippet');
+    }
+
+    final stock = _stock;
+    if (stock != null && stock > 0 && stock <= 5) {
+      buffer.writeln('\n⚡ Only $stock left in stock — hurry!');
+    }
+
+    buffer.writeln();
+    buffer.write(_tagline);
+    return buffer.toString();
   }
 
   Future<void> _handleTap(SharePlatform p) async {
@@ -151,12 +212,39 @@ class _ShareProductSheetState extends State<ShareProductSheet> {
             .replaceAll('{subject}', subject);
         await _launch(Uri.parse(url), fallback: fallback != null ? Uri.parse(fallback) : null);
       } else {
-        await Share.share(_shareText, subject: _name);
+        await _shareWithImage();
       }
     } catch (e) {
       if (mounted) {
         AppToast.show(context, message: 'Could not open ${p.label}', type: ToastType.error);
       }
+    }
+  }
+
+  /// Native share sheet ("more"/no deeplink template) attaches the product
+  /// photo alongside the rich text, closer to how Amazon/Flipkart share a
+  /// product card rather than a bare caption. Falls back to text-only if the
+  /// image can't be fetched.
+  Future<void> _shareWithImage() async {
+    if (_imageUrl.isEmpty) {
+      await Share.share(_shareText, subject: _name);
+      return;
+    }
+    try {
+      final res = await Dio().get<List<int>>(
+        _imageUrl,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = res.data;
+      if (bytes == null || bytes.isEmpty) throw Exception('empty image');
+      final dir = await getTemporaryDirectory();
+      final ext = _imageUrl.split('.').last.split('?').first;
+      final safeExt = ext.length <= 4 ? ext : 'jpg';
+      final file = File('${dir.path}/product-${DateTime.now().microsecondsSinceEpoch}.$safeExt');
+      await file.writeAsBytes(bytes, flush: true);
+      await Share.shareXFiles([XFile(file.path)], text: _shareText, subject: _name);
+    } catch (_) {
+      await Share.share(_shareText, subject: _name);
     }
   }
 

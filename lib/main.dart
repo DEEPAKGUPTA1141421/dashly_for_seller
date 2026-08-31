@@ -17,9 +17,9 @@ void main() async {
   AuthInterceptor.navigatorKey = _navigatorKey;
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
+    statusBarIconBrightness: Brightness.dark,
     systemNavigationBarColor: AppColors.bg,
-    systemNavigationBarIconBrightness: Brightness.light,
+    systemNavigationBarIconBrightness: Brightness.dark,
   ));
   runApp(const ProviderScope(child: DashlySellerApp()));
 }
@@ -112,10 +112,14 @@ class _SplashScreenState extends State<_SplashScreen>
                         ),
                       ],
                     ),
-                    child: const Icon(
-                      Icons.storefront_rounded,
-                      color: AppColors.bg,
-                      size: 44,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: Image.asset(
+                        'assets/images/logo.png',
+                        width: 88,
+                        height: 88,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),

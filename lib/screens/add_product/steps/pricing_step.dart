@@ -3,8 +3,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../../../models/discount_config.dart';
 import '../../../providers/add_product_provider.dart';
 import '../../../utils/app_colors.dart';
+import '../../../widgets/products/discount_editor_sheet.dart';
 
 class PricingStep extends ConsumerStatefulWidget {
   const PricingStep({super.key});
@@ -23,6 +25,8 @@ class _PricingStepState extends ConsumerState<PricingStep> {
   String _weight = '100g';
   static const _weights = ['50g', '100g', '250g', '500g', '1kg', '2kg', '5kg', 'Custom'];
 
+  DiscountConfig? _discountConfig;
+
   @override
   void initState() {
     super.initState();
@@ -32,6 +36,7 @@ class _PricingStepState extends ConsumerState<PricingStep> {
     _stockCtrl.text = s.stock;
     _skuCtrl.text   = s.sku;
     _weight         = s.weight.isNotEmpty ? s.weight : '100g';
+    _discountConfig = s.discount;
   }
 
   @override
@@ -46,11 +51,12 @@ class _PricingStepState extends ConsumerState<PricingStep> {
   void _next() {
     if (!_formKey.currentState!.validate()) return;
     ref.read(addProductPod.notifier).savePricing(
-      price:  _priceCtrl.text.trim(),
-      mrp:    _mrpCtrl.text.trim(),
-      stock:  _stockCtrl.text.trim(),
-      sku:    _skuCtrl.text.trim(),
-      weight: _weight,
+      price:    _priceCtrl.text.trim(),
+      mrp:      _mrpCtrl.text.trim(),
+      stock:    _stockCtrl.text.trim(),
+      sku:      _skuCtrl.text.trim(),
+      weight:   _weight,
+      discount: _discountConfig,
     );
   }
 
@@ -130,6 +136,19 @@ class _PricingStepState extends ConsumerState<PricingStep> {
                 ],
               ),
             ],
+
+            const SizedBox(height: 16),
+
+            const Text('DISCOUNT',
+                style: TextStyle(color: AppColors.grey, fontSize: 13, fontWeight: FontWeight.w500))
+                .animate().fadeIn(delay: 110.ms),
+            const SizedBox(height: 10),
+            DiscountSummaryTile(
+              title: 'Discount configuration',
+              discount: _discountConfig,
+              mrp: double.tryParse(_mrpCtrl.text),
+              onChanged: (d) => setState(() => _discountConfig = d),
+            ).animate().fadeIn(delay: 120.ms),
 
             const SizedBox(height: 16),
 

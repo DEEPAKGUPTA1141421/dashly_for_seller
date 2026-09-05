@@ -10,7 +10,7 @@ class ApiEndpoints {
   // Android emulator or a physical device.
   static const String _apiHost = String.fromEnvironment(
     'API_HOST',
-    defaultValue: '192.168.1.115',
+    defaultValue: '192.168.1.114',
   );
 
   static const String productServiceBase = String.fromEnvironment(

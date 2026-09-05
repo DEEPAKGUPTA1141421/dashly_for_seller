@@ -139,7 +139,7 @@ class AppTheme {
       labelStyle: labelLg,
       contentPadding: const EdgeInsets.symmetric(horizontal: sp16, vertical: sp14),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: AppColors.surface,
       elevation: 0,
       margin: EdgeInsets.zero,
